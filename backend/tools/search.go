@@ -48,7 +48,7 @@ func (g *Grep) Parameters() string {
 	}`
 }
 
-func (g *Grep) Execute(ctx context.Context, argsJSON string) (string, error) {
+func (g *Grep) Execute(ctx context.Context, argsJSON string) Result {
 	var args struct {
 		Pattern    string `json:"pattern"`
 		Path       string `json:"path"`
@@ -56,7 +56,7 @@ func (g *Grep) Execute(ctx context.Context, argsJSON string) (string, error) {
 		MaxResults int    `json:"max_results"`
 	}
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+		return Result{Error: fmt.Sprintf("invalid arguments: %v", err), Output: fmt.Sprintf("Error: invalid arguments: %v", err)}
 	}
 	if args.Path == "" {
 		args.Path = "."
@@ -67,14 +67,14 @@ func (g *Grep) Execute(ctx context.Context, argsJSON string) (string, error) {
 
 	re, err := regexp.Compile(args.Pattern)
 	if err != nil {
-		return "", fmt.Errorf("invalid regex: %w", err)
+		return Result{Error: fmt.Sprintf("invalid regex: %v", err), Output: fmt.Sprintf("Error: invalid regex: %v", err)}
 	}
 
 	searchDir := filepath.Join(g.workDir, args.Path)
 	searchDir, _ = filepath.Abs(searchDir)
 	workAbs, _ := filepath.Abs(g.workDir)
 	if !strings.HasPrefix(searchDir, workAbs) {
-		return "", fmt.Errorf("path outside working directory")
+		return Result{Error: "path outside working directory", Output: "Error: path outside working directory"}
 	}
 
 	var sb strings.Builder
@@ -126,16 +126,28 @@ func (g *Grep) Execute(ctx context.Context, argsJSON string) (string, error) {
 		return nil
 	})
 	if err != nil {
-		return "", err
+		return Result{Error: err.Error(), Output: fmt.Sprintf("Error: %v", err)}
 	}
 
 	if count == 0 {
-		return "No matches found.", nil
+		return Result{
+			Title:  fmt.Sprintf("Grep %q (no matches)", args.Pattern),
+			Output: "No matches found.",
+			Metadata: map[string]any{"pattern": args.Pattern, "matches": 0},
+		}
 	}
 	if count >= args.MaxResults {
 		fmt.Fprintf(&sb, "\n... (truncated at %d results)", args.MaxResults)
 	}
-	return sb.String(), nil
+	return Result{
+		Title:  fmt.Sprintf("Grep %q (%d matches)", args.Pattern, count),
+		Output: sb.String(),
+		Metadata: map[string]any{
+			"pattern": args.Pattern,
+			"matches": count,
+			"path":    args.Path,
+		},
+	}
 }
 
 // --- Glob tool ---
@@ -167,13 +179,13 @@ func (g *Glob) Parameters() string {
 	}`
 }
 
-func (g *Glob) Execute(ctx context.Context, argsJSON string) (string, error) {
+func (g *Glob) Execute(ctx context.Context, argsJSON string) Result {
 	var args struct {
 		Pattern string `json:"pattern"`
 		Path    string `json:"path"`
 	}
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+		return Result{Error: fmt.Sprintf("invalid arguments: %v", err), Output: fmt.Sprintf("Error: invalid arguments: %v", err)}
 	}
 	if args.Path == "" {
 		args.Path = "."
@@ -183,7 +195,7 @@ func (g *Glob) Execute(ctx context.Context, argsJSON string) (string, error) {
 	searchDir, _ = filepath.Abs(searchDir)
 	workAbs, _ := filepath.Abs(g.workDir)
 	if !strings.HasPrefix(searchDir, workAbs) {
-		return "", fmt.Errorf("path outside working directory")
+		return Result{Error: "path outside working directory", Output: "Error: path outside working directory"}
 	}
 
 	// Extract the filename pattern from the glob (last segment).
@@ -213,13 +225,24 @@ func (g *Glob) Execute(ctx context.Context, argsJSON string) (string, error) {
 		return nil
 	})
 	if err != nil {
-		return "", err
+		return Result{Error: err.Error(), Output: fmt.Sprintf("Error: %v", err)}
 	}
 
 	if len(matches) == 0 {
-		return "No files matched.", nil
+		return Result{
+			Title:    fmt.Sprintf("Glob %q (no matches)", args.Pattern),
+			Output:   "No files matched.",
+			Metadata: map[string]any{"pattern": args.Pattern, "matches": 0},
+		}
 	}
-	return strings.Join(matches, "\n"), nil
+	return Result{
+		Title:  fmt.Sprintf("Glob %q (%d files)", args.Pattern, len(matches)),
+		Output: strings.Join(matches, "\n"),
+		Metadata: map[string]any{
+			"pattern": args.Pattern,
+			"matches": len(matches),
+		},
+	}
 }
 
 // --- FileEdit tool ---
@@ -255,45 +278,54 @@ func (f *FileEdit) Parameters() string {
 	}`
 }
 
-func (f *FileEdit) Execute(ctx context.Context, argsJSON string) (string, error) {
+func (f *FileEdit) Execute(ctx context.Context, argsJSON string) Result {
 	var args struct {
 		Path      string `json:"path"`
 		OldString string `json:"old_string"`
 		NewString string `json:"new_string"`
 	}
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+		return Result{Error: fmt.Sprintf("invalid arguments: %v", err), Output: fmt.Sprintf("Error: invalid arguments: %v", err)}
 	}
 
 	absPath := filepath.Join(f.workDir, args.Path)
 	absPath, _ = filepath.Abs(absPath)
 	workAbs, _ := filepath.Abs(f.workDir)
 	if !strings.HasPrefix(absPath, workAbs) {
-		return "", fmt.Errorf("path outside working directory")
+		return Result{Error: "path outside working directory", Output: "Error: path outside working directory"}
 	}
 
 	data, err := os.ReadFile(absPath)
 	if err != nil {
-		return "", fmt.Errorf("read file: %w", err)
+		return Result{Error: err.Error(), Output: fmt.Sprintf("Error: read file: %v", err)}
 	}
 
 	content := string(data)
 	count := strings.Count(content, args.OldString)
 	if count == 0 {
-		return "Error: old_string not found in file. Make sure it matches exactly.", nil
+		return Result{
+			Title:  fmt.Sprintf("Edit %s (no match)", args.Path),
+			Error:  "old_string not found",
+			Output: "Error: old_string not found in file. Make sure it matches exactly.",
+		}
 	}
 	if count > 1 {
-		return fmt.Sprintf("Error: old_string found %d times. Provide more context to make it unique.", count), nil
+		return Result{
+			Title:  fmt.Sprintf("Edit %s (ambiguous)", args.Path),
+			Error:  fmt.Sprintf("old_string found %d times", count),
+			Output: fmt.Sprintf("Error: old_string found %d times. Provide more context to make it unique.", count),
+		}
 	}
 
 	newContent := strings.Replace(content, args.OldString, args.NewString, 1)
 	if err := os.WriteFile(absPath, []byte(newContent), 0644); err != nil {
-		return "", fmt.Errorf("write file: %w", err)
+		return Result{Error: err.Error(), Output: fmt.Sprintf("Error: write file: %v", err)}
 	}
 
-	result, _ := json.Marshal(map[string]any{
-		"output":         fmt.Sprintf("Edited %s: replaced 1 occurrence", args.Path),
-		"files_modified": []string{args.Path},
-	})
-	return string(result), nil
+	return Result{
+		Title:         fmt.Sprintf("Edited %s", args.Path),
+		Output:        fmt.Sprintf("Edited %s: replaced 1 occurrence", args.Path),
+		FilesModified: []string{args.Path},
+		Metadata:      map[string]any{"path": args.Path},
+	}
 }

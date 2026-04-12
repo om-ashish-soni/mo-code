@@ -25,6 +25,12 @@ var ModelContextLimits = map[string]int{
 	"gemini-2.0-flash":             1_000_000,
 	"gemini-1.5-pro":               2_000_000,
 	"gemini-1.5-flash":             1_000_000,
+
+	// Ollama local models (common defaults)
+	"qwen2.5-coder:7b":  32_768,
+	"llama3.1:8b":       128_000,
+	"codellama:13b":     16_384,
+	"deepseek-coder:6.7b": 16_384,
 }
 
 // DefaultModelForProvider returns the default model ID for a provider name.
@@ -36,6 +42,12 @@ func DefaultModelForProvider(providerName string) string {
 	case "gemini":
 		return "gemini-2.0-flash"
 	case "copilot":
+		return "gpt-4o"
+	case "openrouter":
+		return "anthropic/claude-sonnet-4"
+	case "ollama":
+		return "qwen2.5-coder:7b"
+	case "azure":
 		return "gpt-4o"
 	default:
 		return ""

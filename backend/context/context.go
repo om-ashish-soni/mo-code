@@ -181,6 +181,39 @@ func (m *Manager) trimIfNeeded() {
 	}
 }
 
+// BuildEnvironmentBlock returns the XML-structured environment info
+// for inclusion in system prompts. Reusable by both normal and plan mode.
+func BuildEnvironmentBlock(workingDir string) string {
+	var sb strings.Builder
+
+	sb.WriteString("<env>\n")
+	sb.WriteString(fmt.Sprintf("  Working directory: %s\n", workingDir))
+	sb.WriteString(fmt.Sprintf("  Platform: %s/%s\n", runtime.GOOS, runtime.GOARCH))
+	sb.WriteString(fmt.Sprintf("  Today's date: %s\n", time.Now().Format("2006-01-02")))
+
+	// Detect git repo and inject full git context.
+	if _, err := os.Stat(filepath.Join(workingDir, ".git")); err == nil {
+		sb.WriteString("  Is directory a git repo: yes\n")
+		if branch := gitCurrentBranch(workingDir); branch != "" {
+			sb.WriteString(fmt.Sprintf("  Current branch: %s\n", branch))
+		}
+		if status := gitShortStatus(workingDir); status != "" {
+			sb.WriteString(fmt.Sprintf("  Git status:\n%s\n", indentLines(status, "    ")))
+		}
+		if diff := gitDiffShort(workingDir); diff != "" {
+			sb.WriteString(fmt.Sprintf("  Uncommitted changes:\n%s\n", indentLines(diff, "    ")))
+		}
+		if log := gitRecentCommits(workingDir, 5); log != "" {
+			sb.WriteString(fmt.Sprintf("  Recent commits:\n%s\n", indentLines(log, "    ")))
+		}
+	} else {
+		sb.WriteString("  Is directory a git repo: no\n")
+	}
+	sb.WriteString("</env>\n")
+
+	return sb.String()
+}
+
 // BuildSystemPrompt constructs a system prompt for the agent with
 // per-provider tuning, XML-structured environment data, git context,
 // instruction file discovery, and tool information.
@@ -191,26 +224,8 @@ func BuildSystemPrompt(workingDir string, toolNames []string, providerName strin
 	sb.WriteString(ProviderPrompt(providerName))
 
 	// 2. Environment block (XML structured for better LLM parsing).
-	sb.WriteString("\n<env>\n")
-	sb.WriteString(fmt.Sprintf("  Working directory: %s\n", workingDir))
-	sb.WriteString(fmt.Sprintf("  Platform: %s/%s\n", runtime.GOOS, runtime.GOARCH))
-	sb.WriteString(fmt.Sprintf("  Today's date: %s\n", time.Now().Format("2006-01-02")))
-
-	// Detect git repo.
-	if _, err := os.Stat(filepath.Join(workingDir, ".git")); err == nil {
-		sb.WriteString("  Is directory a git repo: yes\n")
-		// Include git status snapshot.
-		if status := gitShortStatus(workingDir); status != "" {
-			sb.WriteString(fmt.Sprintf("  Git status:\n%s\n", indentLines(status, "    ")))
-		}
-		// Include recent commits.
-		if log := gitRecentCommits(workingDir, 5); log != "" {
-			sb.WriteString(fmt.Sprintf("  Recent commits:\n%s\n", indentLines(log, "    ")))
-		}
-	} else {
-		sb.WriteString("  Is directory a git repo: no\n")
-	}
-	sb.WriteString("</env>\n")
+	sb.WriteString("\n")
+	sb.WriteString(BuildEnvironmentBlock(workingDir))
 
 	// 3. Tool listing.
 	sb.WriteString("\nYou have access to these tools:\n")
@@ -225,6 +240,49 @@ func BuildSystemPrompt(workingDir string, toolNames []string, providerName strin
 	}
 
 	return sb.String()
+}
+
+// gitCurrentBranch returns the current branch name, or empty string.
+func gitCurrentBranch(dir string) string {
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// gitDiffShort returns a compact diff of uncommitted changes (staged + unstaged).
+// Output is truncated to avoid bloating the system prompt.
+const maxDiffChars = 3000
+
+func gitDiffShort(dir string) string {
+	// Combined staged + unstaged diff.
+	cmd := exec.Command("git", "--no-optional-locks", "diff", "HEAD", "--stat")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	diff := strings.TrimSpace(string(out))
+	if diff == "" {
+		return ""
+	}
+	// If --stat is short enough, include a compact patch for small diffs.
+	if len(diff) < 500 {
+		patchCmd := exec.Command("git", "--no-optional-locks", "diff", "HEAD", "--no-color", "-U2")
+		patchCmd.Dir = dir
+		patchOut, err := patchCmd.Output()
+		if err == nil && len(patchOut) > 0 && len(patchOut) <= maxDiffChars {
+			return strings.TrimSpace(string(patchOut))
+		}
+	}
+	// Fall back to --stat summary if patch is too large.
+	if len(diff) > maxDiffChars {
+		diff = diff[:maxDiffChars] + "\n... (diff truncated)"
+	}
+	return diff
 }
 
 // gitShortStatus returns `git status --short --branch` output, or empty string.

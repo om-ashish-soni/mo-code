@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import '../models/messages.dart';
 import '../theme/colors.dart';
+import 'diff_viewer.dart';
+import 'todo_panel.dart';
 
 class TerminalOutput extends StatefulWidget {
   final List<TerminalLine> lines;
@@ -132,6 +134,19 @@ class _TerminalOutputState extends State<TerminalOutput> {
           '! ${line.content}',
           style: const TextStyle(color: AppColors.red, fontSize: 13),
         );
+      case TerminalLineType.diff:
+        if (line.diffData != null) {
+          return DiffViewer(
+            diff: line.diffData!,
+            onFileTap: widget.onFileTap,
+          );
+        }
+        return const SizedBox.shrink();
+      case TerminalLineType.todo:
+        if (line.todoItems != null) {
+          return TodoPanel(items: line.todoItems!);
+        }
+        return const SizedBox.shrink();
     }
   }
 

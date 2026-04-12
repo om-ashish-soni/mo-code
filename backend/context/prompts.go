@@ -117,7 +117,7 @@ func ProviderPrompt(providerName string) string {
 		return promptClaude
 	case "gemini":
 		return promptGemini
-	case "copilot":
+	case "copilot", "openrouter", "ollama", "azure":
 		return promptCopilot
 	default:
 		return promptCopilot // Default to copilot-style (OpenAI-compatible)

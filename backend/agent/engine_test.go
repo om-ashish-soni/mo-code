@@ -69,7 +69,7 @@ func TestEngineTextOnlyResponse(t *testing.T) {
 	})
 
 	reg := &mockRegistry{p: mp}
-	e := NewEngine(reg, "/tmp")
+	e := NewEngine(reg, "/tmp", nil)
 
 	events, err := e.Start(context.Background(), TaskRequest{
 		ID:     "test-1",
@@ -126,7 +126,7 @@ func TestEngineWithToolCalls(t *testing.T) {
 	})
 
 	reg := &mockRegistry{p: mp}
-	e := NewEngine(reg, "/tmp")
+	e := NewEngine(reg, "/tmp", nil)
 
 	events, err := e.Start(context.Background(), TaskRequest{
 		ID:     "test-tool-1",
@@ -197,7 +197,7 @@ func TestEngineMaxRoundsExceeded(t *testing.T) {
 	}
 
 	reg := &mockRegistry{p: mp}
-	e := NewEngine(reg, "/tmp")
+	e := NewEngine(reg, "/tmp", nil)
 
 	events, err := e.Start(context.Background(), TaskRequest{
 		ID:     "test-max-rounds",
@@ -232,7 +232,7 @@ func TestEngineMaxRoundsExceeded(t *testing.T) {
 
 func TestEngineStatus(t *testing.T) {
 	reg := provider.NewRegistry()
-	e := NewEngine(reg, "/tmp")
+	e := NewEngine(reg, "/tmp", nil)
 
 	// Status of unknown task.
 	_, err := e.Status("nonexistent")
@@ -243,7 +243,7 @@ func TestEngineStatus(t *testing.T) {
 
 func TestEngineCancelUnknown(t *testing.T) {
 	reg := provider.NewRegistry()
-	e := NewEngine(reg, "/tmp")
+	e := NewEngine(reg, "/tmp", nil)
 
 	err := e.Cancel("nonexistent")
 	if err == nil {
@@ -253,7 +253,7 @@ func TestEngineCancelUnknown(t *testing.T) {
 
 func TestEngineInfo(t *testing.T) {
 	reg := provider.NewRegistry()
-	e := NewEngine(reg, "/home/test")
+	e := NewEngine(reg, "/home/test", nil)
 
 	info := e.EngineInfo()
 	if info["working_dir"] != "/home/test" {
@@ -266,7 +266,7 @@ func TestEngineInfo(t *testing.T) {
 
 func TestEngineStartUnconfigured(t *testing.T) {
 	reg := provider.NewRegistry()
-	e := NewEngine(reg, "/tmp")
+	e := NewEngine(reg, "/tmp", nil)
 
 	// Should fail because no API key is configured.
 	_, err := e.Start(context.Background(), TaskRequest{

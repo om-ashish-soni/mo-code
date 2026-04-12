@@ -1,14 +1,14 @@
 # ISSUE-005: Redundant/Unused Backend Entrypoint
 
 ## Status
-Medium
+RESOLVED (R4-C3)
 
 ## Description
-The repository contains a full Go backend implementation in `backend/`, but the primary automation script `scripts/start-server.sh` ignores it entirely in favor of `opencode serve`.
+The repository previously had confusion about whether the custom Go daemon or `opencode serve` was the primary backend.
 
-## Evidence
-- `scripts/start-server.sh` explicitly calls `opencode serve --port 4096`.
-- `backend/cmd/mocode/main.go` implements a server that uses `backend/api` logic, which is not being used by the scripts.
-
-## Impact
-Increased maintenance surface and confusion about which backend logic (custom vs. OpenCode) is active.
+## Resolution
+The custom Go daemon (`backend/cmd/mocode/main.go`) is the sole backend. All references to `opencode serve` have been removed. Scripts (`start-server.sh`, `release.sh`) use the custom daemon. The daemon provides:
+- HTTP API on localhost (health, config, status, copilot auth)
+- WebSocket for real-time agent communication
+- Agent engine with 6 providers, 16 tools, session persistence
+- Plan mode with read-only agent

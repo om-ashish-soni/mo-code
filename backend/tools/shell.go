@@ -63,7 +63,7 @@ func (s *ShellExec) Parameters() string {
 	}`
 }
 
-func (s *ShellExec) Execute(ctx context.Context, argsJSON string) (string, error) {
+func (s *ShellExec) Execute(ctx context.Context, argsJSON string) Result {
 	var args struct {
 		Command        string `json:"command"`
 		Description    string `json:"description"`
@@ -71,16 +71,16 @@ func (s *ShellExec) Execute(ctx context.Context, argsJSON string) (string, error
 		WorkingDir     string `json:"working_dir"`
 	}
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+		return Result{Error: fmt.Sprintf("invalid arguments: %v", err), Output: fmt.Sprintf("Error: invalid arguments: %v", err)}
 	}
 
 	if args.Command == "" {
-		return "", fmt.Errorf("command is required")
+		return Result{Error: "command is required", Output: "Error: command is required"}
 	}
 
 	// Block obviously dangerous commands.
 	if isDangerous(args.Command) {
-		return "", fmt.Errorf("command blocked for safety: %q", args.Command)
+		return Result{Error: fmt.Sprintf("command blocked for safety: %q", args.Command), Output: fmt.Sprintf("Error: command blocked for safety: %q", args.Command)}
 	}
 
 	timeout := shellTimeout
@@ -117,6 +117,7 @@ func (s *ShellExec) Execute(ctx context.Context, argsJSON string) (string, error
 	err := cmd.Run()
 
 	var sb strings.Builder
+	exitCode := 0
 
 	if stdout.Len() > 0 {
 		out := stdout.String()
@@ -137,22 +138,45 @@ func (s *ShellExec) Execute(ctx context.Context, argsJSON string) (string, error
 		sb.WriteString(errOut)
 	}
 
+	var errMsg string
 	if err != nil {
 		if cmdCtx.Err() == context.DeadlineExceeded {
 			sb.WriteString(fmt.Sprintf("\n(command timed out after %s)", timeout))
+			errMsg = "timeout"
 		}
-		exitCode := -1
+		exitCode = -1
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		}
 		sb.WriteString(fmt.Sprintf("\n(exit code: %d)", exitCode))
+		if errMsg == "" {
+			errMsg = fmt.Sprintf("exit code %d", exitCode)
+		}
 	}
 
-	if sb.Len() == 0 {
-		return "(no output)", nil
+	output := sb.String()
+	if output == "" {
+		output = "(no output)"
 	}
 
-	return sb.String(), nil
+	title := args.Description
+	if title == "" {
+		// Use first 60 chars of command as title.
+		title = args.Command
+		if len(title) > 60 {
+			title = title[:60] + "..."
+		}
+	}
+
+	return Result{
+		Title:  title,
+		Output: output,
+		Error:  errMsg,
+		Metadata: map[string]any{
+			"command":   args.Command,
+			"exit_code": exitCode,
+		},
+	}
 }
 
 // isDangerous returns true for commands that should never be run by an agent.

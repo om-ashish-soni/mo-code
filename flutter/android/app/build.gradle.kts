@@ -16,7 +16,7 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "io.github.omashishsoni.mocode"
-    compileSdk = 34
+    compileSdk = 35
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -31,7 +31,7 @@ android {
     defaultConfig {
         applicationId = "io.github.omashishsoni.mocode"
         minSdk = 24
-        targetSdk = 34
+        targetSdk = 35
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }

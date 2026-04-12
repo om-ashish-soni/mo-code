@@ -35,7 +35,7 @@ func NewCopilot() *Copilot {
 			Model:     copilotDefaultModel,
 			MaxTokens: copilotMaxTokensDefault,
 		},
-		client: &http.Client{},
+		client: NewHTTPClient(),
 		auth:   NewCopilotAuth(),
 	}
 }

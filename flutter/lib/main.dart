@@ -4,6 +4,7 @@ import 'api/daemon.dart';
 import 'theme/colors.dart';
 import 'screens/agent_screen.dart';
 import 'screens/files_screen.dart';
+import 'screens/sessions_screen.dart';
 import 'screens/tasks_screen.dart';
 import 'screens/config_screen.dart';
 
@@ -79,6 +80,30 @@ class _MainScreenState extends State<MainScreen> {
           ),
         ],
       ),
+      floatingActionButton: FloatingActionButton.small(
+        backgroundColor: AppColors.surface,
+        onPressed: _openSessions,
+        tooltip: 'Session history',
+        child: const Icon(Icons.history, color: AppColors.purple, size: 20),
+      ),
     );
+  }
+
+  void _openSessions() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => Provider.value(
+          value: context.read<OpenCodeAPI>(),
+          child: const SessionsScreen(),
+        ),
+      ),
+    ).then((result) {
+      if (result is Map && result['action'] == 'resume') {
+        // Switch to Agent tab and the agent screen can handle the resume.
+        setState(() => _currentIndex = 0);
+        // TODO: pass session_id to AgentScreen for resumption
+      }
+    });
   }
 }

@@ -40,28 +40,32 @@ func (q *Question) Parameters() string {
 	}`
 }
 
-func (q *Question) Execute(ctx context.Context, argsJSON string) (string, error) {
+func (q *Question) Execute(ctx context.Context, argsJSON string) Result {
 	var args struct {
 		Question string   `json:"question"`
 		Options  []string `json:"options"`
 	}
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+		return Result{Error: fmt.Sprintf("invalid arguments: %v", err), Output: fmt.Sprintf("Error: invalid arguments: %v", err)}
 	}
 
 	// The question is returned as the tool result. The engine's event stream
 	// will deliver it to the UI, which shows it to the user. The user's
 	// response comes back as the next user message in the conversation.
-	result := args.Question
+	output := args.Question
 	if len(args.Options) > 0 {
-		result += "\n\nOptions:"
+		output += "\n\nOptions:"
 		for i, opt := range args.Options {
-			result += fmt.Sprintf("\n  %d. %s", i+1, opt)
+			output += fmt.Sprintf("\n  %d. %s", i+1, opt)
 		}
 	}
 
-	output, _ := json.Marshal(map[string]any{
-		"output": result,
-	})
-	return string(output), nil
+	return Result{
+		Title:  "Question for user",
+		Output: output,
+		Metadata: map[string]any{
+			"question": args.Question,
+			"options":  args.Options,
+		},
+	}
 }

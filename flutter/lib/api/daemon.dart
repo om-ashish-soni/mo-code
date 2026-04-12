@@ -2,11 +2,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 class OpenCodeAPI {
   static const _defaultPort = 19280;
+  static const _daemonChannel = MethodChannel('io.mocode/daemon');
 
   String _baseUrl = 'http://127.0.0.1:$_defaultPort';
   String? _username;
@@ -14,6 +16,7 @@ class OpenCodeAPI {
   bool _connected = false;
   String? _sessionId;
   String? _lastError;
+  bool _daemonManagedLocally = false;
 
   // Track subscriptions + channels for cleanup
   WebSocketChannel? _eventChannel;
@@ -74,9 +77,76 @@ class OpenCodeAPI {
     return {'X-Opencode-Directory': directory};
   }
 
+  // --- Daemon lifecycle (Android foreground service) ---
+
+  /// Start the Go daemon via the Android foreground service.
+  /// No-op on non-Android platforms.
+  Future<bool> startDaemon() async {
+    if (!Platform.isAndroid) return false;
+    try {
+      final result = await _daemonChannel.invokeMethod<bool>('startDaemon');
+      _daemonManagedLocally = result == true;
+      if (_daemonManagedLocally) {
+        // Wait for daemon to initialize and write its port file.
+        await Future.delayed(const Duration(seconds: 2));
+      }
+      return _daemonManagedLocally;
+    } on MissingPluginException {
+      debugPrint('Daemon platform channel not available');
+      return false;
+    }
+  }
+
+  /// Stop the daemon foreground service.
+  Future<bool> stopDaemon() async {
+    if (!Platform.isAndroid) return false;
+    try {
+      final result = await _daemonChannel.invokeMethod<bool>('stopDaemon');
+      _daemonManagedLocally = false;
+      return result == true;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
+  /// Check if the daemon process is running (via foreground service).
+  Future<bool> isDaemonRunning() async {
+    if (!Platform.isAndroid) return false;
+    try {
+      return await _daemonChannel.invokeMethod<bool>('isRunning') == true;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
+  /// Get the port the daemon is listening on (from the service).
+  Future<int> getDaemonPort() async {
+    if (!Platform.isAndroid) return 0;
+    try {
+      return await _daemonChannel.invokeMethod<int>('getPort') ?? 0;
+    } on MissingPluginException {
+      return 0;
+    }
+  }
+
   Future<void> connect() async {
-    // Try port discovery before connecting
-    await discoverPort();
+    // On Android, start the daemon if it's not already running.
+    if (Platform.isAndroid) {
+      final running = await isDaemonRunning();
+      if (!running) {
+        await startDaemon();
+      }
+      // Try to get port from the service first.
+      final servicePort = await getDaemonPort();
+      if (servicePort > 0) {
+        _baseUrl = 'http://127.0.0.1:$servicePort';
+        debugPrint('Using daemon port from service: $servicePort');
+      } else {
+        await discoverPort();
+      }
+    } else {
+      await discoverPort();
+    }
 
     try {
       final health = await fetchHealth();
@@ -96,10 +166,16 @@ class OpenCodeAPI {
     }
   }
 
+  int _wsReconnectAttempt = 0;
+  Timer? _wsReconnectTimer;
+  static const _wsMaxReconnectDelay = Duration(seconds: 30);
+  static const _wsMaxReconnectAttempts = 10;
+
   void _startEventStream() {
     // Clean up any previous subscription
     _eventSubscription?.cancel();
     _eventChannel?.sink.close();
+    _wsReconnectTimer?.cancel();
 
     try {
       final wsUrl = '${_baseUrl.replaceFirst('http', 'ws')}/ws';
@@ -107,6 +183,7 @@ class OpenCodeAPI {
 
       _eventSubscription = _eventChannel!.stream.listen(
         (data) {
+          _wsReconnectAttempt = 0; // Reset on successful data.
           try {
             final decoded = jsonDecode(data as String) as Map<String, dynamic>;
             _messagesController.add(decoded);
@@ -118,16 +195,45 @@ class OpenCodeAPI {
           debugPrint('Event stream error: $e');
           _connected = false;
           _connectionController.add(false);
+          _scheduleWsReconnect();
         },
         onDone: () {
           debugPrint('Event stream closed');
           _connected = false;
           _connectionController.add(false);
+          _scheduleWsReconnect();
         },
       );
     } catch (e) {
       debugPrint('Failed to start event stream: $e');
+      _scheduleWsReconnect();
     }
+  }
+
+  void _scheduleWsReconnect() {
+    if (_wsReconnectAttempt >= _wsMaxReconnectAttempts) {
+      debugPrint('WebSocket: max reconnect attempts reached');
+      return;
+    }
+    _wsReconnectTimer?.cancel();
+    _wsReconnectAttempt++;
+    // Exponential backoff: 1s, 2s, 4s, 8s, ... capped at 30s.
+    final delaySec = Duration(
+      seconds: (1 << (_wsReconnectAttempt - 1))
+          .clamp(1, _wsMaxReconnectDelay.inSeconds),
+    );
+    debugPrint('WebSocket: reconnecting in ${delaySec.inSeconds}s (attempt $_wsReconnectAttempt)');
+    _wsReconnectTimer = Timer(delaySec, () async {
+      // Verify daemon is still healthy before reconnecting.
+      final health = await fetchHealth();
+      if (health != null) {
+        _connected = true;
+        _connectionController.add(true);
+        _startEventStream();
+      } else {
+        _scheduleWsReconnect();
+      }
+    });
   }
 
   Future<Map<String, dynamic>?> fetchHealth() async {
@@ -444,7 +550,71 @@ class OpenCodeAPI {
     });
   }
 
+  // --- Session management via WebSocket ---
+
+  /// Request session list via WebSocket. Response arrives on messages stream
+  /// as a message with type 'session.list_result'.
+  String? requestSessionList() {
+    _msgCounter++;
+    final id = 'sess-list-$_msgCounter';
+    final sent = sendWsJson({
+      'type': 'session.list',
+      'id': id,
+    });
+    return sent ? id : null;
+  }
+
+  /// Request a single session by ID. Response arrives as 'session.get_result'.
+  String? requestSessionGet(String sessionId) {
+    _msgCounter++;
+    final id = 'sess-get-$_msgCounter';
+    final sent = sendWsJson({
+      'type': 'session.get',
+      'id': id,
+      'payload': {'id': sessionId},
+    });
+    return sent ? id : null;
+  }
+
+  /// Resume a session with a new prompt. Events stream as 'agent.stream'.
+  String? resumeSession(String sessionId, String prompt) {
+    _msgCounter++;
+    final id = 'sess-resume-$_msgCounter';
+    final sent = sendWsJson({
+      'type': 'session.resume',
+      'id': id,
+      'payload': {'id': sessionId, 'prompt': prompt},
+    });
+    return sent ? id : null;
+  }
+
+  /// Delete a session. Response arrives as 'session.list_result' with updated list.
+  String? deleteSession(String sessionId) {
+    _msgCounter++;
+    final id = 'sess-del-$_msgCounter';
+    final sent = sendWsJson({
+      'type': 'session.delete',
+      'id': id,
+      'payload': {'id': sessionId},
+    });
+    return sent ? id : null;
+  }
+
+  /// Wait for a specific message type from the WS stream with a timeout.
+  Future<Map<String, dynamic>?> waitForMessage(String type, {Duration timeout = const Duration(seconds: 5)}) async {
+    try {
+      return await messages
+          .where((msg) => msg['type'] == type)
+          .first
+          .timeout(timeout);
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> disconnect() async {
+    _wsReconnectTimer?.cancel();
+    _wsReconnectAttempt = 0;
     _eventSubscription?.cancel();
     _eventSubscription = null;
     _eventChannel?.sink.close();

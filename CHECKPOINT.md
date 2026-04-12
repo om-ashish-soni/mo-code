@@ -1,19 +1,19 @@
 # Mo-Code Checkpoint
 
 ## Last updated
-2026-04-13 by Claude (C3, Round 3 Flutter polish complete)
+2026-04-13 by Claude (C1, Round 4 C1+C2 performance+resilience complete)
 
 ## Handoff note
-Round 3 C3 (Flutter polish) + C4 (release pipeline) complete. C1 (Android foreground service) and C2 (E2E testing) still pending.
+Round 4: ALL COMPLETE (C1+C2 combined + C3 done separately). Ready for Round 5 beta testing.
 
-Architecture: Custom Go daemon with agent engine, 6 providers (Claude, Gemini, Copilot, OpenRouter, Ollama, Azure). Flutter app with 5 screens (Agent, Files, Tasks, Config, Sessions). Localhost HTTP + WebSocket.
+Architecture: Custom Go daemon with agent engine, 6 providers (Claude, Gemini, Copilot, OpenRouter, Ollama, Azure). Flutter app with 5 screens (Agent, Files, Tasks, Config, Sessions). Localhost HTTP + WebSocket. Android foreground service keeps daemon alive when backgrounded. All providers have retry with exponential backoff, HTTP timeouts, and connection pooling. WebSocket auto-reconnects on disconnect.
 
 **Play Store release:** Version 1.1.0+2, SDK 35, `./scripts/release.sh` ready. Blocked on Om: keystore generation, key.properties, run `./scripts/release.sh`, Play Console upload.
 
-**Build status:** `flutter analyze` passes clean (0 issues). Go build status from prior rounds.
+**Build status:** `flutter analyze` clean. `go build ./...`, `go test ./...`, `go vet ./...` all clean.
 
 ## Current phase
-Round 3 PARTIAL — C3 + C4 done, C1 + C2 pending
+Round 4 COMPLETE — ready for Round 5 (beta testing).
 
 ## Redesign Round 1 — COMPLETE (2026-04-13)
 - [x] E6: Structured tool results — `Result{Title, Metadata, Output}` across all 16 tools (C1)
@@ -33,16 +33,16 @@ Round 3 PARTIAL — C3 + C4 done, C1 + C2 pending
 - [x] H3: Git context in system prompt (C4) ✓
 - [x] H4: Continuation preamble after compaction (C4) ✓
 
-## Redesign Round 3 — PARTIAL (C3 + C4 done, C1 + C2 pending)
-- [ ] Android foreground service (Kotlin) (C1)
-- [ ] End-to-end integration testing (C2)
+## Redesign Round 3 — COMPLETE
+- [x] Android foreground service — DaemonService.kt, DaemonBridge.kt, platform channel, daemon.dart integration (C1) ✓
+- [x] End-to-end integration testing — tools/e2e_test.go (20+ tests), agent/e2e_test.go (6 tests), cancel bug fix in engine.go (C2) ✓
 - [x] Flutter polish — shimmer loading, connection banner, auto-reconnect, error/retry states, pull-to-refresh (C3) ✓
 - [x] Release pipeline — scripts fixed, release.sh, v1.1.0+2, SDK 35, store listing updated (C4) ✓
 
-## Redesign Round 4 — PENDING
-- [ ] Bug fixes from R3
-- [ ] Performance + resilience
-- [ ] Docs + scripts + final QA
+## Redesign Round 4 — COMPLETE
+- [x] Bug fixes from R3 — no outstanding bugs after C2 E2E testing (C1) ✓
+- [x] Performance + resilience — provider retry with backoff, HTTP timeouts + connection pooling across all 6 providers, WebSocket auto-reconnect in daemon.dart (C1) ✓
+- [x] Docs + scripts + final QA (C3) — API_PROTOCOL.md rewritten, cmd tests added, /health alias, all issues resolved ✓
 
 ## Round 5 — Beta testing (1 session)
 
@@ -66,11 +66,13 @@ Round 3 PARTIAL — C3 + C4 done, C1 + C2 pending
 - [x] Handle all agent event kinds in Flutter UI
 
 ## Known issues remaining
-- ISSUE-003: Stale protocol docs (API_PROTOCOL.md)
-- ISSUE-004: Missing cmd tests
-- ISSUE-005: Redundant backend entrypoint
+- ~~ISSUE-003: Stale protocol docs~~ — RESOLVED (R4-C3, API_PROTOCOL.md fully rewritten)
+- ~~ISSUE-004: Missing cmd tests~~ — RESOLVED (R4-C3, main_test.go with 5 tests)
+- ~~ISSUE-005: Redundant backend entrypoint~~ — RESOLVED (R4-C3, confirmed custom daemon is sole backend)
 - ~~ISSUE-006: Broken automation scripts~~ — RESOLVED (R3-C4, all scripts rewritten)
-- ISSUE-008b: Health endpoint 404 on custom daemon
+- ~~ISSUE-008b: Health endpoint 404~~ — RESOLVED (R4-C3, added /health alias route)
+
+All known issues resolved.
 
 ## Build note
 All packages compile and pass tests: `go build ./...`, `go test ./...`, `go vet ./...` clean.
@@ -84,6 +86,8 @@ All packages compile and pass tests: `go build ./...`, `go test ./...`, `go vet 
 - `backend/provider/openai_compat.go` — Shared OpenAI-compatible request/SSE code
 - `flutter/` — Flutter mobile app (5 screens + diff viewer, TODO panel, session history, shimmer loading, connection banner widgets)
 - `scripts/` — setup, build-go, build-flutter, test, start-server, release (all fixed)
-- `docs/` — project spec and reference docs
+- `backend/cmd/mocode/main_test.go` — 5 tests for port file, working dir, provider env vars
+- `docs/` — project spec and reference docs (API_PROTOCOL.md fully current)
+- `issues/` — issue tracker (all 5 issues resolved)
 - `WORKPLAN.md` — full 4-round parallel work plan
 - `REDESIGN_PLAN.md` — gap analysis with code snippets

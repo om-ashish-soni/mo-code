@@ -31,7 +31,7 @@ func NewGemini() *Gemini {
 			Model:     geminiDefaultModel,
 			MaxTokens: geminiMaxTokensDefault,
 		},
-		client: &http.Client{},
+		client: NewHTTPClient(),
 	}
 }
 

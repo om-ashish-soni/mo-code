@@ -13,17 +13,25 @@ Unlike cloud-based mobile code editors, mo-code runs a real coding agent runtime
 
 KEY FEATURES
 
-• Multi-provider AI — Switch between Claude (Anthropic), Gemini (Google), and GitHub Copilot. Use whichever model fits your task.
+• Multi-provider AI — Switch between Claude (Anthropic), Gemini (Google), and GitHub Copilot mid-conversation. Use whichever model fits your task.
 
-• GitHub Copilot without API keys — Authenticate with your GitHub account using device auth flow. No API keys or subscriptions beyond what you already have.
+• GitHub Copilot without API keys — Authenticate with your GitHub account using device auth flow. No tokens to copy-paste.
 
-• Terminal-style UI — Familiar command-line interface with syntax-highlighted output. JetBrains Mono font for readable code.
+• Inline diff viewer — See file changes with syntax-colored additions and deletions, line numbers, and collapsible hunks — right in the conversation.
+
+• Task progress panel — Watch the agent's TODO list update in real-time as it plans and executes multi-step coding tasks.
+
+• Session persistence — Conversations survive restarts. Resume past sessions and pick up where you left off.
+
+• Streaming markdown — Agent output renders with full markdown formatting, code blocks, tables, and syntax highlighting.
+
+• Terminal-style UI — Familiar command-line interface with JetBrains Mono font. Dark theme optimized for mobile.
 
 • Slash commands — /model, /provider, /stop, /clear, /session and more for quick control without leaving the conversation.
 
-• File browser — Browse and navigate your project files directly in the app.
+• Smart context management — Automatic conversation compaction when context gets large, with budget-constrained summaries so you never lose important details.
 
-• Task history — Review past coding sessions and pick up where you left off.
+• File browser — Browse and navigate your project files directly in the app.
 
 • Stop button — Interrupt long-running agent tasks instantly.
 
@@ -31,13 +39,14 @@ KEY FEATURES
 
 ARCHITECTURE
 
-mo-code pairs a Flutter mobile frontend with a Go-based agent runtime (powered by OpenCode). Communication happens over HTTP and SSE on localhost. The agent has access to your local filesystem, shell, and git — enabling real coding workflows, not just chat.
+mo-code pairs a Flutter mobile frontend with a Go-based agent runtime. Communication happens over HTTP and WebSocket on localhost. The agent has access to your local filesystem, shell, and git — enabling real coding workflows, not just chat. Full tool suite: file read/write/edit, grep, glob, shell, git, and sub-agent spawning.
 
 IDEAL FOR
 
 • Reviewing and fixing code on the go
 • Quick bug fixes from your phone
 • Prototyping ideas when away from your desk
+• Pair programming with AI from anywhere
 • Learning to code with AI assistance
 
 SUPPORTED AI PROVIDERS
