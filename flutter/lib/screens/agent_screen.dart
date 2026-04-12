@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../api/daemon.dart';
@@ -7,6 +8,8 @@ import '../models/messages.dart';
 import '../widgets/terminal_output.dart';
 import '../widgets/provider_switcher.dart';
 import '../widgets/input_bar.dart';
+import '../widgets/connection_banner.dart';
+import '../widgets/shimmer_loading.dart';
 
 class AgentScreen extends StatefulWidget {
   const AgentScreen({super.key});
@@ -18,9 +21,17 @@ class AgentScreen extends StatefulWidget {
 class _AgentScreenState extends State<AgentScreen> {
   final List<TerminalLine> _lines = [];
   String _activeProvider = 'copilot';
+  String _activeModel = 'gpt-4o';
   bool _connected = false;
   bool _taskRunning = false;
   String? _activeTaskId;
+
+  // Connection lifecycle
+  bool _initializing = true; // true until first connect attempt finishes
+  bool _reconnecting = false;
+  int _reconnectAttempt = 0;
+  Timer? _reconnectTimer;
+  static const _maxReconnectDelay = Duration(seconds: 30);
 
   // Track subscriptions for cleanup
   StreamSubscription? _messageSub;
@@ -34,37 +45,81 @@ class _AgentScreenState extends State<AgentScreen> {
 
   @override
   void dispose() {
+    _reconnectTimer?.cancel();
     _messageSub?.cancel();
     _connectionSub?.cancel();
     super.dispose();
   }
 
   Future<void> _initConnection() async {
-    await Future.delayed(const Duration(milliseconds: 500));
-    _checkConnection();
+    await Future.delayed(const Duration(milliseconds: 300));
+    await _attemptConnect();
   }
 
-  Future<void> _checkConnection() async {
+  Future<void> _attemptConnect() async {
     final api = context.read<OpenCodeAPI>();
     try {
       await api.connect();
       if (!mounted) return;
-      setState(() => _connected = true);
+      setState(() {
+        _connected = true;
+        _initializing = false;
+        _reconnecting = false;
+        _reconnectAttempt = 0;
+      });
       _addLine(TerminalLine(type: TerminalLineType.text, content: 'Connected to mo-code daemon'));
+
+      // Cancel any pending reconnect timer.
+      _reconnectTimer?.cancel();
+
+      // Re-subscribe to streams (cancel old ones first).
+      _messageSub?.cancel();
+      _connectionSub?.cancel();
 
       _messageSub = api.messages.listen(_handleEvent);
       _connectionSub = api.connection.listen((c) {
         if (!mounted) return;
+        final wasConnected = _connected;
         setState(() => _connected = c);
-        if (!c) {
+        if (!c && wasConnected) {
           _addLine(TerminalLine(type: TerminalLineType.error, content: 'Disconnected from server'));
+          _scheduleReconnect();
         }
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _connected = false);
-      _addLine(TerminalLine(type: TerminalLineType.error, content: 'Connection failed: $e'));
+      setState(() {
+        _connected = false;
+        _initializing = false;
+      });
+      if (_reconnectAttempt == 0) {
+        _addLine(TerminalLine(type: TerminalLineType.error, content: 'Connection failed: $e'));
+      }
+      _scheduleReconnect();
     }
+  }
+
+  void _scheduleReconnect() {
+    if (_reconnecting) return; // already scheduled
+    _reconnectTimer?.cancel();
+    setState(() => _reconnecting = true);
+
+    // Exponential backoff: 1s, 2s, 4s, 8s, ... capped at 30s.
+    _reconnectAttempt++;
+    final delaySec = min(pow(2, _reconnectAttempt - 1).toInt(), _maxReconnectDelay.inSeconds);
+    _reconnectTimer = Timer(Duration(seconds: delaySec), () {
+      if (!mounted) return;
+      _attemptConnect();
+    });
+  }
+
+  void _manualRetry() {
+    _reconnectTimer?.cancel();
+    setState(() {
+      _reconnecting = true;
+      _reconnectAttempt = 0;
+    });
+    _attemptConnect();
   }
 
   void _handleEvent(Map<String, dynamic> event) {
@@ -78,6 +133,7 @@ class _AgentScreenState extends State<AgentScreen> {
         if (payload is Map<String, dynamic>) {
           final kind = payload['kind'] as String? ?? '';
           final content = payload['content'] as String? ?? '';
+          final metadata = payload['metadata'] as Map<String, dynamic>? ?? {};
           switch (kind) {
             case 'text':
               if (content.isNotEmpty) {
@@ -85,12 +141,30 @@ class _AgentScreenState extends State<AgentScreen> {
               }
               break;
             case 'tool_call':
-              _addLine(TerminalLine(type: TerminalLineType.toolCall, content: content));
+              final toolArgs = metadata['args'] as String? ?? '';
+              final display = toolArgs.isNotEmpty
+                  ? '$content($toolArgs)'
+                  : content;
+              _addLine(TerminalLine(type: TerminalLineType.toolCall, content: display));
               break;
             case 'tool_result':
               if (content.isNotEmpty) {
                 _addToolResult(content);
               }
+              break;
+            case 'token_usage':
+              final input = metadata['input'] ?? 0;
+              final output = metadata['output'] ?? 0;
+              _addLine(TerminalLine(
+                type: TerminalLineType.tokenCount,
+                content: 'tokens: $input in / $output out',
+              ));
+              break;
+            case 'file_create':
+              _addLine(TerminalLine(type: TerminalLineType.fileCreated, content: content));
+              break;
+            case 'file_modify':
+              _addLine(TerminalLine(type: TerminalLineType.fileModified, content: content));
               break;
             case 'plan':
               _addLine(TerminalLine(type: TerminalLineType.planStep, content: content));
@@ -100,6 +174,15 @@ class _AgentScreenState extends State<AgentScreen> {
               break;
             case 'error':
               _addLine(TerminalLine(type: TerminalLineType.error, content: content));
+              break;
+            case 'diff':
+              _handleDiffEvent(metadata);
+              break;
+            case 'todo_update':
+              _handleTodoEvent(metadata);
+              break;
+            case 'done':
+              // Stream is done, but task.complete will handle the UI update.
               break;
           }
         }
@@ -186,19 +269,46 @@ class _AgentScreenState extends State<AgentScreen> {
     }
   }
 
-  // --- Slash command definitions ---
-  static const _availableModels = {
-    'claude': ['claude-4-sonnet', 'claude-4-opus', 'claude-3.5-haiku'],
-    'gemini': ['gemini-2.5-pro', 'gemini-2.5-flash'],
-    'copilot': ['gpt-4o', 'claude-4-sonnet'],
-  };
+  void _handleDiffEvent(Map<String, dynamic> metadata) {
+    final diffData = DiffFile.fromJson(metadata);
+    _addLine(TerminalLine(
+      type: TerminalLineType.diff,
+      diffData: diffData,
+    ));
+  }
 
+  void _handleTodoEvent(Map<String, dynamic> metadata) {
+    final rawItems = metadata['items'] as List<dynamic>? ?? [];
+    final items = rawItems
+        .map((i) => TodoItem.fromJson(i as Map<String, dynamic>))
+        .toList();
+
+    // Update in-place if there's already a todo panel, otherwise add new.
+    setState(() {
+      final existingIdx = _lines.lastIndexWhere(
+        (l) => l.type == TerminalLineType.todo,
+      );
+      if (existingIdx >= 0) {
+        _lines[existingIdx] = TerminalLine(
+          type: TerminalLineType.todo,
+          todoItems: items,
+        );
+      } else {
+        _lines.add(TerminalLine(
+          type: TerminalLineType.todo,
+          todoItems: items,
+        ));
+      }
+    });
+  }
+
+  // --- Slash command definitions ---
   static const _availableSkills = [
-    '/model <name>    — switch model (e.g. /model gemini-2.5-pro)',
+    '/model <name>    — switch model (e.g. /model gpt-4o)',
     '/skills          — list available slash commands',
     '/stop            — stop current task',
     '/clear           — clear terminal output',
-    '/provider <name> — switch provider (claude, gemini, copilot)',
+    '/provider <name> — switch provider (copilot, claude, gemini)',
     '/session         — show current session info',
   ];
 
@@ -240,6 +350,7 @@ class _AgentScreenState extends State<AgentScreen> {
         return true;
       case '/session':
         _addLine(TerminalLine(type: TerminalLineType.text, content: 'Provider: $_activeProvider'));
+        _addLine(TerminalLine(type: TerminalLineType.text, content: 'Model: $_activeModel'));
         _addLine(TerminalLine(type: TerminalLineType.text, content: 'Connected: $_connected'));
         _addLine(TerminalLine(type: TerminalLineType.text, content: 'Task running: $_taskRunning'));
         if (_activeTaskId != null) {
@@ -255,82 +366,37 @@ class _AgentScreenState extends State<AgentScreen> {
 
   void _handleModelCommand(String modelName) {
     if (modelName.isEmpty) {
-      _showModelPicker();
+      // List available models for current provider.
+      final models = switch (_activeProvider) {
+        'copilot' => copilotModels,
+        'claude' => claudeModels,
+        'gemini' => geminiModels,
+        _ => <dynamic>[],
+      };
+      _addLine(TerminalLine(type: TerminalLineType.text, content: 'Current: $_activeModel ($_activeProvider)'));
+      _addLine(TerminalLine(type: TerminalLineType.text, content: 'Available models:'));
+      for (final m in models) {
+        final marker = m.id == _activeModel ? ' *' : '';
+        _addLine(TerminalLine(type: TerminalLineType.planStep, content: '  ${m.id}$marker'));
+      }
       return;
     }
-    _selectModel(modelName);
+    _onModelSwitch(modelName);
   }
 
-  void _selectModel(String modelName) {
-    // Find which provider has this model
-    String? resolvedProvider;
-    for (final entry in _availableModels.entries) {
-      if (entry.value.contains(modelName)) {
-        resolvedProvider = entry.key;
-        break;
-      }
-    }
-    if (resolvedProvider != null && resolvedProvider != _activeProvider) {
-      _onProviderSwitch(resolvedProvider);
-    }
-    _addLine(TerminalLine(type: TerminalLineType.text, content: 'Model set to: $modelName'));
-  }
-
-  void _showModelPicker() {
-    final models = _availableModels[_activeProvider] ?? [];
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        return Container(
-          decoration: const BoxDecoration(
-            color: AppColors.panel,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
-            border: Border(
-              top: BorderSide(color: AppColors.border),
-              left: BorderSide(color: AppColors.border),
-              right: BorderSide(color: AppColors.border),
-            ),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-                child: Text(
-                  'Models — $_activeProvider',
-                  style: const TextStyle(
-                    color: AppColors.textMuted,
-                    fontSize: 12,
-                    fontFamily: 'JetBrainsMono',
-                  ),
-                ),
-              ),
-              const Divider(color: AppColors.border, height: 1),
-              ...models.map((model) => InkWell(
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _selectModel(model);
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  child: Text(
-                    model,
-                    style: const TextStyle(
-                      color: AppColors.textPrimary,
-                      fontSize: 14,
-                      fontFamily: 'JetBrainsMono',
-                    ),
-                  ),
-                ),
-              )),
-              const SizedBox(height: 8),
-            ],
-          ),
-        );
+  /// Switch model within the current provider by sending config.set to the backend.
+  void _onModelSwitch(String modelId) {
+    final api = context.read<OpenCodeAPI>();
+    api.sendWsMessage({
+      'type': 'config.set',
+      'id': 'model-${DateTime.now().millisecondsSinceEpoch}',
+      'payload': {
+        'key': 'providers.$_activeProvider.model',
+        'value': modelId,
       },
-    );
+    });
+    setState(() => _activeModel = modelId);
+    _addLine(TerminalLine(type: TerminalLineType.text, content: 'Model: $modelId ($_activeProvider)'));
   }
 
   void _stopTask() {
@@ -372,8 +438,26 @@ class _AgentScreenState extends State<AgentScreen> {
   }
 
   void _onProviderSwitch(String provider) {
-    setState(() => _activeProvider = provider);
-    _addLine(TerminalLine(type: TerminalLineType.text, content: 'Provider switched to $provider'));
+    // Set default model for the new provider.
+    final defaultModel = switch (provider) {
+      'copilot' => 'gpt-4o',
+      'claude' => 'claude-sonnet-4-20250514',
+      'gemini' => 'gemini-2.5-flash',
+      _ => 'gpt-4o',
+    };
+
+    final api = context.read<OpenCodeAPI>();
+    api.sendWsMessage({
+      'type': 'provider.switch',
+      'id': 'sw-${DateTime.now().millisecondsSinceEpoch}',
+      'payload': {'provider': provider},
+    });
+
+    setState(() {
+      _activeProvider = provider;
+      _activeModel = defaultModel;
+    });
+    _addLine(TerminalLine(type: TerminalLineType.text, content: 'Provider: $provider ($defaultModel)'));
   }
 
   @override
@@ -384,11 +468,24 @@ class _AgentScreenState extends State<AgentScreen> {
         child: Column(
           children: [
             _buildStatusBar(),
+            // Connection banner — shown when disconnected (after initial connect).
+            if (!_connected && !_initializing)
+              ConnectionBanner(
+                isReconnecting: _reconnecting,
+                attemptNumber: _reconnectAttempt > 0 ? _reconnectAttempt : null,
+                onRetry: _manualRetry,
+              ),
             ProviderSwitcher(
               activeProvider: _activeProvider,
-              onSwitch: _onProviderSwitch,
+              activeModel: _activeModel,
+              onProviderSwitch: _onProviderSwitch,
+              onModelSwitch: _onModelSwitch,
             ),
-            Expanded(child: TerminalOutput(lines: _lines)),
+            Expanded(
+              child: _initializing
+                  ? _buildInitialLoading()
+                  : TerminalOutput(lines: _lines),
+            ),
             InputBar(
               onSubmit: _onSubmit,
               disabled: !_connected,
@@ -398,6 +495,38 @@ class _AgentScreenState extends State<AgentScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildInitialLoading() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          ShimmerLoading(
+            child: Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.terminal, color: AppColors.purple, size: 28),
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Connecting to daemon...',
+            style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+          ),
+          const SizedBox(height: 8),
+          const SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.purple),
+          ),
+        ],
       ),
     );
   }
@@ -419,25 +548,96 @@ class _AgentScreenState extends State<AgentScreen> {
           ),
           Row(
             children: [
-              Container(
-                width: 6,
-                height: 6,
-                margin: const EdgeInsets.only(right: 6),
-                decoration: BoxDecoration(
-                  color: _connected ? AppColors.green : AppColors.red,
-                  shape: BoxShape.circle,
-                ),
-              ),
+              _ConnectionDot(connected: _connected, reconnecting: _reconnecting),
+              const SizedBox(width: 6),
               Text(
-                _connected ? _activeProvider : 'disconnected',
+                _connected
+                    ? _activeProvider
+                    : _reconnecting
+                        ? 'reconnecting'
+                        : 'disconnected',
                 style: TextStyle(
-                  color: _connected ? AppColors.green : AppColors.textMuted,
+                  color: _connected
+                      ? AppColors.green
+                      : _reconnecting
+                          ? AppColors.amber
+                          : AppColors.textMuted,
                   fontSize: 12,
                 ),
               ),
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Animated connection dot — pulses amber when reconnecting.
+class _ConnectionDot extends StatefulWidget {
+  final bool connected;
+  final bool reconnecting;
+  const _ConnectionDot({required this.connected, required this.reconnecting});
+
+  @override
+  State<_ConnectionDot> createState() => _ConnectionDotState();
+}
+
+class _ConnectionDotState extends State<_ConnectionDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulse = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    );
+    if (widget.reconnecting) _pulse.repeat(reverse: true);
+  }
+
+  @override
+  void didUpdateWidget(_ConnectionDot old) {
+    super.didUpdateWidget(old);
+    if (widget.reconnecting && !old.reconnecting) {
+      _pulse.repeat(reverse: true);
+    } else if (!widget.reconnecting && old.reconnecting) {
+      _pulse.stop();
+      _pulse.value = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = widget.connected
+        ? AppColors.green
+        : widget.reconnecting
+            ? AppColors.amber
+            : AppColors.red;
+
+    if (!widget.reconnecting) {
+      return Container(
+        width: 6,
+        height: 6,
+        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+      );
+    }
+
+    return FadeTransition(
+      opacity: Tween<double>(begin: 0.3, end: 1.0).animate(
+        CurvedAnimation(parent: _pulse, curve: Curves.easeInOut),
+      ),
+      child: Container(
+        width: 6,
+        height: 6,
+        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
       ),
     );
   }

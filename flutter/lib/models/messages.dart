@@ -56,8 +56,17 @@ class TerminalLine {
   final String content;
   final DateTime timestamp;
 
-  TerminalLine({required this.type, this.content = '', DateTime? timestamp})
-      : timestamp = timestamp ?? DateTime.now();
+  /// Structured data for diff and todo line types.
+  final DiffFile? diffData;
+  final List<TodoItem>? todoItems;
+
+  TerminalLine({
+    required this.type,
+    this.content = '',
+    DateTime? timestamp,
+    this.diffData,
+    this.todoItems,
+  }) : timestamp = timestamp ?? DateTime.now();
 }
 
 enum TerminalLineType {
@@ -72,6 +81,8 @@ enum TerminalLineType {
   separator,
   text,
   error,
+  diff,
+  todo,
 }
 
 class ConfigState {
@@ -128,4 +139,139 @@ enum TaskStateStatus {
   completed,
   failed,
   canceled,
+}
+
+// ---------------------------------------------------------------------------
+// Diff models (mirrors backend DiffHunk / DiffHunkLine)
+// ---------------------------------------------------------------------------
+
+class DiffHunkLine {
+  final DiffLineType type;
+  final String content;
+
+  const DiffHunkLine({required this.type, required this.content});
+
+  factory DiffHunkLine.fromJson(Map<String, dynamic> json) {
+    return DiffHunkLine(
+      type: DiffLineType.fromString(json['type'] as String? ?? 'context'),
+      content: json['content'] as String? ?? '',
+    );
+  }
+}
+
+enum DiffLineType {
+  context,
+  added,
+  removed;
+
+  static DiffLineType fromString(String s) {
+    switch (s) {
+      case 'added':
+        return DiffLineType.added;
+      case 'removed':
+        return DiffLineType.removed;
+      default:
+        return DiffLineType.context;
+    }
+  }
+}
+
+class DiffHunk {
+  final int oldStart;
+  final int oldCount;
+  final int newStart;
+  final int newCount;
+  final List<DiffHunkLine> lines;
+
+  const DiffHunk({
+    required this.oldStart,
+    required this.oldCount,
+    required this.newStart,
+    required this.newCount,
+    required this.lines,
+  });
+
+  factory DiffHunk.fromJson(Map<String, dynamic> json) {
+    final rawLines = json['lines'] as List<dynamic>? ?? [];
+    return DiffHunk(
+      oldStart: json['old_start'] as int? ?? 0,
+      oldCount: json['old_count'] as int? ?? 0,
+      newStart: json['new_start'] as int? ?? 0,
+      newCount: json['new_count'] as int? ?? 0,
+      lines: rawLines
+          .map((l) => DiffHunkLine.fromJson(l as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+}
+
+class DiffFile {
+  final String path;
+  final List<DiffHunk> hunks;
+
+  const DiffFile({required this.path, required this.hunks});
+
+  factory DiffFile.fromJson(Map<String, dynamic> json) {
+    final rawHunks = json['hunks'] as List<dynamic>? ?? [];
+    return DiffFile(
+      path: json['file'] as String? ?? json['path'] as String? ?? '',
+      hunks: rawHunks
+          .map((h) => DiffHunk.fromJson(h as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+
+  int get additions =>
+      hunks.fold(0, (sum, h) => sum + h.lines.where((l) => l.type == DiffLineType.added).length);
+  int get deletions =>
+      hunks.fold(0, (sum, h) => sum + h.lines.where((l) => l.type == DiffLineType.removed).length);
+}
+
+// ---------------------------------------------------------------------------
+// TODO item model (for TodoWrite / TODO panel)
+// ---------------------------------------------------------------------------
+
+class TodoItem {
+  final String id;
+  final String content;
+  final TodoStatus status;
+
+  const TodoItem({
+    required this.id,
+    required this.content,
+    required this.status,
+  });
+
+  factory TodoItem.fromJson(Map<String, dynamic> json) {
+    return TodoItem(
+      id: json['id'] as String? ?? '',
+      content: json['content'] as String? ?? '',
+      status: TodoStatus.fromString(json['status'] as String? ?? 'pending'),
+    );
+  }
+
+  TodoItem copyWith({String? content, TodoStatus? status}) {
+    return TodoItem(
+      id: id,
+      content: content ?? this.content,
+      status: status ?? this.status,
+    );
+  }
+}
+
+enum TodoStatus {
+  pending,
+  inProgress,
+  completed;
+
+  static TodoStatus fromString(String s) {
+    switch (s) {
+      case 'in_progress':
+        return TodoStatus.inProgress;
+      case 'completed':
+        return TodoStatus.completed;
+      default:
+        return TodoStatus.pending;
+    }
+  }
 }

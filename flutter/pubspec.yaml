@@ -1,7 +1,7 @@
 name: mo_code
 description: "Mobile AI coding agent - terminal-style UI with OpenCode backend"
 publish_to: 'none'
-version: 0.2.0+1
+version: 1.1.0+2
 
 environment:
   sdk: ^3.0.0
@@ -15,11 +15,14 @@ dependencies:
   shared_preferences: ^2.2.2
   speech_to_text: ^7.0.0
   permission_handler: ^11.1.0
+  flutter_markdown: ^0.7.7+1
+  flutter_highlighter: ^0.1.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.14.4
 
 flutter:
   uses-material-design: true

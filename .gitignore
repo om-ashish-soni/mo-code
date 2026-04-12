@@ -15,6 +15,11 @@ backend/mocode
 .flutter-plugins-dependencies
 **/local.properties
 
+# Release signing
+**/key.properties
+*.keystore
+*.jks
+
 # Build artifacts
 build/
 dist/

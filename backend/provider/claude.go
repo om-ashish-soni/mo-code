@@ -32,7 +32,7 @@ func NewClaude() *Claude {
 			Model:     claudeDefaultModel,
 			MaxTokens: claudeMaxTokensDefault,
 		},
-		client: &http.Client{},
+		client: NewHTTPClient(),
 	}
 }
 
