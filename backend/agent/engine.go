@@ -67,6 +67,11 @@ func (e *Engine) Start(ctx context.Context, req TaskRequest) (<-chan Event, erro
 	systemPrompt := agentctx.BuildSystemPrompt(e.workingDir, toolNames, providerName)
 	ctxMgr := agentctx.NewManager(systemPrompt)
 
+	// Set per-model context limit if we can identify the model.
+	if modelID := agentctx.DefaultModelForProvider(providerName); modelID != "" {
+		ctxMgr.SetMaxTokens(agentctx.ContextLimitForModel(modelID))
+	}
+
 	// Add the user prompt.
 	ctxMgr.AddMessage(provider.Message{
 		Role:    provider.RoleUser,
