@@ -21,6 +21,7 @@ class AgentScreen extends StatefulWidget {
 class _AgentScreenState extends State<AgentScreen> {
   final List<TerminalLine> _lines = [];
   String _activeProvider = 'copilot';
+  String _activeModel = 'gpt-4o';
   bool _connected = false;
   bool _taskRunning = false;
   String? _activeTaskId;
@@ -302,18 +303,12 @@ class _AgentScreenState extends State<AgentScreen> {
   }
 
   // --- Slash command definitions ---
-  static const _availableModels = {
-    'claude': ['claude-4-sonnet', 'claude-4-opus', 'claude-3.5-haiku'],
-    'gemini': ['gemini-2.5-pro', 'gemini-2.5-flash'],
-    'copilot': ['gpt-4o', 'claude-4-sonnet'],
-  };
-
   static const _availableSkills = [
-    '/model <name>    — switch model (e.g. /model gemini-2.5-pro)',
+    '/model <name>    — switch model (e.g. /model gpt-4o)',
     '/skills          — list available slash commands',
     '/stop            — stop current task',
     '/clear           — clear terminal output',
-    '/provider <name> — switch provider (claude, gemini, copilot)',
+    '/provider <name> — switch provider (copilot, claude, gemini)',
     '/session         — show current session info',
   ];
 
@@ -355,6 +350,7 @@ class _AgentScreenState extends State<AgentScreen> {
         return true;
       case '/session':
         _addLine(TerminalLine(type: TerminalLineType.text, content: 'Provider: $_activeProvider'));
+        _addLine(TerminalLine(type: TerminalLineType.text, content: 'Model: $_activeModel'));
         _addLine(TerminalLine(type: TerminalLineType.text, content: 'Connected: $_connected'));
         _addLine(TerminalLine(type: TerminalLineType.text, content: 'Task running: $_taskRunning'));
         if (_activeTaskId != null) {
@@ -370,82 +366,37 @@ class _AgentScreenState extends State<AgentScreen> {
 
   void _handleModelCommand(String modelName) {
     if (modelName.isEmpty) {
-      _showModelPicker();
+      // List available models for current provider.
+      final models = switch (_activeProvider) {
+        'copilot' => copilotModels,
+        'claude' => claudeModels,
+        'gemini' => geminiModels,
+        _ => <dynamic>[],
+      };
+      _addLine(TerminalLine(type: TerminalLineType.text, content: 'Current: $_activeModel ($_activeProvider)'));
+      _addLine(TerminalLine(type: TerminalLineType.text, content: 'Available models:'));
+      for (final m in models) {
+        final marker = m.id == _activeModel ? ' *' : '';
+        _addLine(TerminalLine(type: TerminalLineType.planStep, content: '  ${m.id}$marker'));
+      }
       return;
     }
-    _selectModel(modelName);
+    _onModelSwitch(modelName);
   }
 
-  void _selectModel(String modelName) {
-    // Find which provider has this model
-    String? resolvedProvider;
-    for (final entry in _availableModels.entries) {
-      if (entry.value.contains(modelName)) {
-        resolvedProvider = entry.key;
-        break;
-      }
-    }
-    if (resolvedProvider != null && resolvedProvider != _activeProvider) {
-      _onProviderSwitch(resolvedProvider);
-    }
-    _addLine(TerminalLine(type: TerminalLineType.text, content: 'Model set to: $modelName'));
-  }
-
-  void _showModelPicker() {
-    final models = _availableModels[_activeProvider] ?? [];
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        return Container(
-          decoration: const BoxDecoration(
-            color: AppColors.panel,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
-            border: Border(
-              top: BorderSide(color: AppColors.border),
-              left: BorderSide(color: AppColors.border),
-              right: BorderSide(color: AppColors.border),
-            ),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-                child: Text(
-                  'Models — $_activeProvider',
-                  style: const TextStyle(
-                    color: AppColors.textMuted,
-                    fontSize: 12,
-                    fontFamily: 'JetBrainsMono',
-                  ),
-                ),
-              ),
-              const Divider(color: AppColors.border, height: 1),
-              ...models.map((model) => InkWell(
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _selectModel(model);
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  child: Text(
-                    model,
-                    style: const TextStyle(
-                      color: AppColors.textPrimary,
-                      fontSize: 14,
-                      fontFamily: 'JetBrainsMono',
-                    ),
-                  ),
-                ),
-              )),
-              const SizedBox(height: 8),
-            ],
-          ),
-        );
+  /// Switch model within the current provider by sending config.set to the backend.
+  void _onModelSwitch(String modelId) {
+    final api = context.read<OpenCodeAPI>();
+    api.sendWsMessage({
+      'type': 'config.set',
+      'id': 'model-${DateTime.now().millisecondsSinceEpoch}',
+      'payload': {
+        'key': 'providers.$_activeProvider.model',
+        'value': modelId,
       },
-    );
+    });
+    setState(() => _activeModel = modelId);
+    _addLine(TerminalLine(type: TerminalLineType.text, content: 'Model: $modelId ($_activeProvider)'));
   }
 
   void _stopTask() {
@@ -487,8 +438,26 @@ class _AgentScreenState extends State<AgentScreen> {
   }
 
   void _onProviderSwitch(String provider) {
-    setState(() => _activeProvider = provider);
-    _addLine(TerminalLine(type: TerminalLineType.text, content: 'Provider switched to $provider'));
+    // Set default model for the new provider.
+    final defaultModel = switch (provider) {
+      'copilot' => 'gpt-4o',
+      'claude' => 'claude-sonnet-4-20250514',
+      'gemini' => 'gemini-2.5-flash',
+      _ => 'gpt-4o',
+    };
+
+    final api = context.read<OpenCodeAPI>();
+    api.sendWsMessage({
+      'type': 'provider.switch',
+      'id': 'sw-${DateTime.now().millisecondsSinceEpoch}',
+      'payload': {'provider': provider},
+    });
+
+    setState(() {
+      _activeProvider = provider;
+      _activeModel = defaultModel;
+    });
+    _addLine(TerminalLine(type: TerminalLineType.text, content: 'Provider: $provider ($defaultModel)'));
   }
 
   @override
@@ -508,7 +477,9 @@ class _AgentScreenState extends State<AgentScreen> {
               ),
             ProviderSwitcher(
               activeProvider: _activeProvider,
-              onSwitch: _onProviderSwitch,
+              activeModel: _activeModel,
+              onProviderSwitch: _onProviderSwitch,
+              onModelSwitch: _onModelSwitch,
             ),
             Expanded(
               child: _initializing
