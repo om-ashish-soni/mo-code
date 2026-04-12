@@ -82,7 +82,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
       'type': 'config.set',
       'id': 'cfg-${DateTime.now().millisecondsSinceEpoch}',
       'payload': {
-        'key': '${provider}_api_key',
+        'key': 'providers.$provider.api_key',
         'value': key,
       },
     });

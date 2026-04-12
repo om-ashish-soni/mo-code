@@ -142,24 +142,77 @@ class _AgentScreenState extends State<AgentScreen> {
   }
 
   void _handleEvent(Map<String, dynamic> event) {
+    if (!mounted) return;
     final type = event['type'] as String? ?? '';
-    
+    final payload = event['payload'];
+
     switch (type) {
-      case 'session.created':
-        final id = event['sessionID'] as String?;
-        if (id != null && _sessionId == null) {
-          setState(() => _sessionId = id);
+      case 'agent.stream':
+        // Streaming content from the agent
+        if (payload is Map<String, dynamic>) {
+          final kind = payload['kind'] as String? ?? '';
+          final content = payload['content'] as String? ?? '';
+          switch (kind) {
+            case 'text':
+              if (content.isNotEmpty) {
+                _addLine(TerminalLine(type: TerminalLineType.text, content: content));
+              }
+              break;
+            case 'tool_call':
+              _addLine(TerminalLine(type: TerminalLineType.toolCall, content: content));
+              break;
+            case 'tool_result':
+              if (content.isNotEmpty) {
+                _addLine(TerminalLine(type: TerminalLineType.text, content: content));
+              }
+              break;
+            case 'plan':
+              _addLine(TerminalLine(type: TerminalLineType.planStep, content: content));
+              break;
+            case 'status':
+              _addLine(TerminalLine(type: TerminalLineType.agentThinking, content: content));
+              break;
+            case 'error':
+              _addLine(TerminalLine(type: TerminalLineType.error, content: content));
+              break;
+          }
         }
         break;
-      case 'session.done':
+      case 'task.complete':
         _addLine(TerminalLine(type: TerminalLineType.separator));
-        _addLine(TerminalLine(type: TerminalLineType.text, content: 'Task completed'));
+        if (payload is Map<String, dynamic>) {
+          final summary = payload['summary'] as String? ?? 'Task completed';
+          final tokens = payload['total_tokens'] as int? ?? 0;
+          _addLine(TerminalLine(type: TerminalLineType.text, content: summary));
+          if (tokens > 0) {
+            _addLine(TerminalLine(type: TerminalLineType.tokenCount, content: '$tokens tokens'));
+          }
+        } else {
+          _addLine(TerminalLine(type: TerminalLineType.text, content: 'Task completed'));
+        }
         setState(() => _taskRunning = false);
         break;
-      case 'session.error':
-        final error = event['error'] ?? event['message'] ?? 'Unknown error';
-        _addLine(TerminalLine(type: TerminalLineType.error, content: 'Error: $error'));
+      case 'task.failed':
+        if (payload is Map<String, dynamic>) {
+          final error = payload['error'] as String? ?? 'Unknown error';
+          _addLine(TerminalLine(type: TerminalLineType.error, content: 'Task failed: $error'));
+        } else {
+          _addLine(TerminalLine(type: TerminalLineType.error, content: 'Task failed'));
+        }
         setState(() => _taskRunning = false);
+        break;
+      case 'error':
+        if (payload is Map<String, dynamic>) {
+          final message = payload['message'] as String? ?? 'Unknown error';
+          _addLine(TerminalLine(type: TerminalLineType.error, content: message));
+        }
+        setState(() => _taskRunning = false);
+        break;
+      case 'config.current':
+        // Config update broadcast — could refresh provider status
+        break;
+      case 'server.status':
+        // Server status update — no UI action needed
         break;
       default:
         debugPrint('Unhandled event: $type');

@@ -124,6 +124,7 @@ func (s *Server) newMux() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/health", handleHealth)
 	mux.HandleFunc("/api/config", s.Config.HandleHTTP)
+	mux.HandleFunc("/api/provider/switch", s.Config.HandleProviderSwitch)
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/auth/copilot/device", s.handleCopilotDeviceAuth)
 	mux.HandleFunc("/api/auth/copilot/poll", s.handleCopilotPoll)

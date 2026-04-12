@@ -164,11 +164,64 @@ func (cm *ConfigManager) Snapshot() ConfigCurrentPayload {
 	}
 }
 
-// HandleHTTP is the handler for GET /api/config.
+// HandleHTTP is the handler for GET/POST /api/config.
+// GET returns the current config snapshot.
+// POST accepts {"key": "...", "value": "..."} to update a config value.
 func (cm *ConfigManager) HandleHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	switch r.Method {
+	case http.MethodGet:
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(cm.Snapshot())
+
+	case http.MethodPost:
+		var req struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Key == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "key and value are required"})
+			return
+		}
+		if err := cm.SetConfig(req.Key, req.Value); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(cm.Snapshot())
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// HandleProviderSwitch is the handler for POST /api/provider/switch.
+func (cm *ConfigManager) HandleProviderSwitch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
+	}
+	var req struct {
+		Provider string `json:"provider"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Provider == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "provider is required"})
+		return
+	}
+	if err := cm.SwitchProvider(req.Provider); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	// Also switch in the registry
+	if cm.registry != nil {
+		_ = cm.registry.SetActive(req.Provider)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(cm.Snapshot())
