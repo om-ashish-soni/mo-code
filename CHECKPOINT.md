@@ -8,8 +8,10 @@ Architecture pivot: Using OpenCode's built-in `serve` command as backend instead
 
 Custom Go daemon retained for Copilot device auth endpoints and future features that OpenCode doesn't cover.
 
+**Play Store release:** Android scaffold regenerated, applicationId `io.github.omashishsoni.mocode`, app icon generated, release signing wired, store listing and privacy policy written. Blocked on: Android SDK install, keystore generation, AAB build, and Play Console upload (all manual steps by Om).
+
 ## Current phase
-Beta fixes + feature implementation in progress
+Play Store internal testing release — config done, build pending
 
 ## Completed
 - [x] Loaded canonical docs from `docs/`
@@ -37,8 +39,14 @@ Beta fixes + feature implementation in progress
 - [x] Add cancelSession API for task interruption
 - [x] Clean up all Dart analysis warnings (0 issues)
 - [x] All Go tests passing (agent, api, context, provider, tools)
+- [x] Play Store: Android scaffold regenerated with applicationId io.github.omashishsoni.mocode
+- [x] Play Store: App icon generated (terminal >_ theme, all densities + adaptive)
+- [x] Play Store: Release signing config wired into build.gradle.kts
+- [x] Play Store: Store listing and privacy policy written
+- [x] Play Store: .gitignore updated for keystore/key.properties
 
 ## In progress
+- [ ] Play Store release — keystore generation, AAB build, Play Console upload (Om manual steps)
 - [ ] Wire .mocode centralized storage into active use
 - [ ] Session/memory persistence across daemon restarts
 - [ ] Android foreground service (Kotlin)

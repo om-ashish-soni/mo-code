@@ -28,6 +28,20 @@
 - [ ] Wire .mocode centralized storage into active use
 - [ ] Session/memory persistence across daemon restarts
 
+## P1.5 — Play Store release
+- [x] Regenerate Android scaffold (gradle, MainActivity, resources)
+- [x] Set applicationId to io.github.omashishsoni.mocode
+- [x] Set minSdk 24, targetSdk 34, compileSdk 34, version 1.0.0+1
+- [x] Generate app icon (terminal >_ theme, all densities + adaptive)
+- [x] Wire release signing config into build.gradle.kts
+- [x] Write store listing metadata
+- [x] Write privacy policy
+- [ ] Generate release keystore (Om — interactive keytool)
+- [ ] Create key.properties with keystore credentials
+- [ ] Build release AAB (flutter build appbundle --release)
+- [ ] Create app in Play Console, upload AAB to Internal Testing
+- [ ] Add testers and roll out
+
 ## P2 — nice to have
 - [x] Add basic repo automation scripts
 - [ ] Update API_PROTOCOL.md to reflect current HTTP+SSE architecture
@@ -36,6 +50,7 @@
 - [ ] Android foreground service (Kotlin native layer)
 
 ## Done (last 10)
+- [x] Play Store release config (Android scaffold, icon, signing, listing, privacy) — completed 2026-04-12
 - [x] Slash commands, device auth, stop button, config tab — completed 2026-04-12
 - [x] Fixed all Flutter compilation and analysis issues — completed 2026-04-12
 - [x] Added Copilot auth HTTP endpoints to Go backend — completed 2026-04-12
