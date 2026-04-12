@@ -145,9 +145,10 @@ class DaemonService : Service() {
         val portFile = File(filesDir, "daemon_port")
         val dataDir = filesDir.absolutePath
 
+        val workDir: String = getExternalFilesDir(null)?.absolutePath ?: dataDir
         val env = mapOf(
             "MOCODE_PORT_FILE" to portFile.absolutePath,
-            "MOCODE_WORKDIR" to getExternalFilesDir(null)?.absolutePath ?: dataDir,
+            "MOCODE_WORKDIR" to workDir,
             "HOME" to dataDir,
             "TMPDIR" to cacheDir.absolutePath,
         )

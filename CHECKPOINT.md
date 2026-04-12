@@ -1,10 +1,10 @@
 # Mo-Code Checkpoint
 
 ## Last updated
-2026-04-13 by Claude (C1, Round 4 C1+C2 performance+resilience complete)
+2026-04-13 by Claude (C3, Round 5 beta testing complete)
 
 ## Handoff note
-Round 4: ALL COMPLETE (C1+C2 combined + C3 done separately). Ready for Round 5 beta testing.
+Round 5 beta testing COMPLETE. All flows tested on Linux desktop, bugs found and fixed. App is functional end-to-end.
 
 Architecture: Custom Go daemon with agent engine, 6 providers (Claude, Gemini, Copilot, OpenRouter, Ollama, Azure). Flutter app with 5 screens (Agent, Files, Tasks, Config, Sessions). Localhost HTTP + WebSocket. Android foreground service keeps daemon alive when backgrounded. All providers have retry with exponential backoff, HTTP timeouts, and connection pooling. WebSocket auto-reconnects on disconnect.
 
@@ -13,7 +13,7 @@ Architecture: Custom Go daemon with agent engine, 6 providers (Claude, Gemini, C
 **Build status:** `flutter analyze` clean. `go build ./...`, `go test ./...`, `go vet ./...` all clean.
 
 ## Current phase
-Round 4 COMPLETE — ready for Round 5 (beta testing).
+Round 5 COMPLETE — beta tested, all flows working.
 
 ## Redesign Round 1 — COMPLETE (2026-04-13)
 - [x] E6: Structured tool results — `Result{Title, Metadata, Output}` across all 16 tools (C1)
@@ -44,7 +44,20 @@ Round 4 COMPLETE — ready for Round 5 (beta testing).
 - [x] Performance + resilience — provider retry with backoff, HTTP timeouts + connection pooling across all 6 providers, WebSocket auto-reconnect in daemon.dart (C1) ✓
 - [x] Docs + scripts + final QA (C3) — API_PROTOCOL.md rewritten, cmd tests added, /health alias, all issues resolved ✓
 
-## Round 5 — Beta testing (1 session)
+## Round 5 — Beta Testing — COMPLETE
+- [x] Agent chat flow — streaming works, task.complete received (C3) ✓
+- [x] Model/provider switching — all Copilot models, 3 provider switches, error handling (C3) ✓
+- [x] File browser — bug found: missing HTTP endpoints `/file/content`, `/find/file`, `/find`, `/session`. Fixed in server.go (C3) ✓
+- [x] Session history — list, get, delete via WebSocket (C3) ✓
+- [x] Config screen — config.set, status, provider.switch all working (C3) ✓
+- [x] Error states — invalid types, empty prompts handled gracefully (C3) ✓
+- [x] Model selection redesign — GitHub Copilot is single provider with multiple models, not separate providers. Rewrote provider_switcher.dart with flat model lists per provider (C3) ✓
+- [x] Auto-reconnect — exponential backoff (1s→30s), manual retry, connection banner (C3) ✓
+
+### Bugs found and fixed during R5:
+1. **Missing HTTP endpoints** — Flutter Files tab and session listing non-functional. Added `/file/content`, `/find/file`, `/find`, `/session` handlers to server.go
+2. **File path doubling** — `/file/content?path=backend/api/server.go` resolved to `backend/backend/api/server.go` when daemon CWD was `backend/`. Fixed path resolution logic
+3. **Model selection architecture** — Switching to "Claude Sonnet 4" under Copilot incorrectly changed provider to `claude`. Redesigned: models are flat list within each provider, model switch sends `config.set` not `provider.switch`
 
 ## Pre-redesign completed
 - [x] Bootstrap Go backend daemon with health endpoint
