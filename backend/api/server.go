@@ -140,6 +140,15 @@ func (s *Server) newMux() *http.ServeMux {
 	mux.HandleFunc("/api/auth/copilot/device", s.handleCopilotDeviceAuth)
 	mux.HandleFunc("/api/auth/copilot/poll", s.handleCopilotPoll)
 	mux.HandleFunc("/ws", s.handleWebSocket)
+
+	// File browser endpoints (used by Flutter Files tab).
+	mux.HandleFunc("/file/content", s.handleFileContent)
+	mux.HandleFunc("/find/file", s.handleFindFile)
+	mux.HandleFunc("/find", s.handleFind)
+
+	// Session HTTP endpoints (used by Flutter Sessions/Tasks tabs).
+	mux.HandleFunc("/session", s.handleSessionHTTP)
+
 	return mux
 }
 
@@ -730,6 +739,230 @@ func (c *wsClient) handleSessionDelete(raw RawMessage) {
 		ID:      raw.ID,
 		Payload: c.server.Sessions.List(),
 	})
+}
+
+// ---------------------------------------------------------------------------
+// File browser HTTP handlers (Flutter Files tab)
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleFileContent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	filePath := r.URL.Query().Get("path")
+	if filePath == "" {
+		http.Error(w, `{"error":"path is required"}`, http.StatusBadRequest)
+		return
+	}
+	dir := r.URL.Query().Get("directory")
+	if dir == "" {
+		dir = s.Config.WorkingDir()
+	}
+	resolvedPath := filePath
+	if dir != "" && !filepath.IsAbs(filePath) {
+		resolvedPath = filepath.Join(dir, filePath)
+	}
+	absPath, err := filepath.Abs(resolvedPath)
+	if err != nil {
+		http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
+		return
+	}
+	if dir != "" {
+		absDir, _ := filepath.Abs(dir)
+		if !strings.HasPrefix(absPath, absDir) {
+			http.Error(w, `{"error":"path outside working directory"}`, http.StatusForbidden)
+			return
+		}
+	}
+	content, err := os.ReadFile(absPath)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"path":    filePath,
+		"content": string(content),
+		"size":    len(content),
+	})
+}
+
+func (s *Server) handleFindFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	query := r.URL.Query().Get("query")
+	if query == "" {
+		http.Error(w, `{"error":"query is required"}`, http.StatusBadRequest)
+		return
+	}
+	dir := r.URL.Query().Get("directory")
+	if dir == "" {
+		dir = s.Config.WorkingDir()
+	}
+	if dir == "" {
+		dir = "."
+	}
+	limit := 20
+	if l := r.URL.Query().Get("limit"); l != "" {
+		fmt.Sscanf(l, "%d", &limit)
+	}
+	var results []map[string]any
+	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			name := d.Name()
+			if name == ".git" || name == "node_modules" || name == ".dart_tool" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if len(results) >= limit {
+			return filepath.SkipAll
+		}
+		name := d.Name()
+		matched, _ := filepath.Match(query, name)
+		if !matched {
+			rel, _ := filepath.Rel(dir, path)
+			matched, _ = filepath.Match(query, rel)
+		}
+		if !matched && !strings.ContainsAny(query, "*?[") {
+			matched = strings.Contains(strings.ToLower(name), strings.ToLower(query))
+		}
+		if matched {
+			rel, _ := filepath.Rel(dir, path)
+			info, _ := d.Info()
+			entry := map[string]any{"path": rel}
+			if info != nil {
+				entry["size"] = info.Size()
+			}
+			results = append(results, entry)
+		}
+		return nil
+	})
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"files": results})
+}
+
+func (s *Server) handleFind(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	pattern := r.URL.Query().Get("pattern")
+	if pattern == "" {
+		http.Error(w, `{"error":"pattern is required"}`, http.StatusBadRequest)
+		return
+	}
+	dir := r.URL.Query().Get("directory")
+	if dir == "" {
+		dir = s.Config.WorkingDir()
+	}
+	if dir == "" {
+		dir = "."
+	}
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		fmt.Sscanf(l, "%d", &limit)
+	}
+	var matches []map[string]any
+	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			name := d.Name()
+			if name == ".git" || name == "node_modules" || name == ".dart_tool" || name == "build" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if len(matches) >= limit {
+			return filepath.SkipAll
+		}
+		info, _ := d.Info()
+		if info != nil && info.Size() > 512*1024 {
+			return nil
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		lines := strings.Split(string(content), "\n")
+		rel, _ := filepath.Rel(dir, path)
+		for i, line := range lines {
+			if len(matches) >= limit {
+				break
+			}
+			if strings.Contains(line, pattern) {
+				matches = append(matches, map[string]any{
+					"file": rel, "path": rel,
+					"line": i + 1, "content": line, "text": line,
+				})
+			}
+		}
+		return nil
+	})
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"matches": matches})
+}
+
+func (s *Server) handleSessionHTTP(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/session")
+	if path != "" && path != "/" {
+		s.handleSessionSubRoute(w, r, path)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		if s.Sessions == nil {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"sessions": []any{}})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"sessions": s.Sessions.List()})
+	case http.MethodPost:
+		var req struct {
+			Title string `json:"title"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if req.Title == "" {
+			req.Title = "Untitled"
+		}
+		id := fmt.Sprintf("sess-%d", time.Now().UnixMilli())
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"id": id, "title": req.Title})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleSessionSubRoute(w http.ResponseWriter, r *http.Request, path string) {
+	parts := strings.SplitN(strings.TrimPrefix(path, "/"), "/", 2)
+	if len(parts) < 2 {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	sessionID := parts[0]
+	action := parts[1]
+	switch action {
+	case "message":
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"session_id": sessionID,
+			"status":     "use WebSocket task.start for real execution",
+		})
+	case "prompt_async":
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		http.Error(w, "not found", http.StatusNotFound)
+	}
 }
 
 // ---------------------------------------------------------------------------

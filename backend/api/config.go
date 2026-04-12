@@ -45,6 +45,13 @@ func (cm *ConfigManager) ActiveProvider() string {
 	return cm.activeProvider
 }
 
+// WorkingDir returns the configured working directory.
+func (cm *ConfigManager) WorkingDir() string {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	return cm.workingDir
+}
+
 // SwitchProvider changes the active provider. Returns error if unknown.
 func (cm *ConfigManager) SwitchProvider(provider string) error {
 	cm.mu.Lock()
