@@ -143,5 +143,8 @@ func DefaultDispatcher(workingDir string) *Dispatcher {
 	d.Register(NewGitAdd(workingDir))
 	d.Register(NewGitCommit(workingDir))
 	d.Register(NewGitPush(workingDir))
+	d.Register(NewGrep(workingDir))
+	d.Register(NewGlob(workingDir))
+	d.Register(NewFileEdit(workingDir))
 	return d
 }
