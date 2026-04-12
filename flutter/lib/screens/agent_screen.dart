@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../api/daemon.dart';
@@ -7,6 +8,8 @@ import '../models/messages.dart';
 import '../widgets/terminal_output.dart';
 import '../widgets/provider_switcher.dart';
 import '../widgets/input_bar.dart';
+import '../widgets/connection_banner.dart';
+import '../widgets/shimmer_loading.dart';
 
 class AgentScreen extends StatefulWidget {
   const AgentScreen({super.key});
@@ -22,6 +25,13 @@ class _AgentScreenState extends State<AgentScreen> {
   bool _taskRunning = false;
   String? _activeTaskId;
 
+  // Connection lifecycle
+  bool _initializing = true; // true until first connect attempt finishes
+  bool _reconnecting = false;
+  int _reconnectAttempt = 0;
+  Timer? _reconnectTimer;
+  static const _maxReconnectDelay = Duration(seconds: 30);
+
   // Track subscriptions for cleanup
   StreamSubscription? _messageSub;
   StreamSubscription? _connectionSub;
@@ -34,37 +44,81 @@ class _AgentScreenState extends State<AgentScreen> {
 
   @override
   void dispose() {
+    _reconnectTimer?.cancel();
     _messageSub?.cancel();
     _connectionSub?.cancel();
     super.dispose();
   }
 
   Future<void> _initConnection() async {
-    await Future.delayed(const Duration(milliseconds: 500));
-    _checkConnection();
+    await Future.delayed(const Duration(milliseconds: 300));
+    await _attemptConnect();
   }
 
-  Future<void> _checkConnection() async {
+  Future<void> _attemptConnect() async {
     final api = context.read<OpenCodeAPI>();
     try {
       await api.connect();
       if (!mounted) return;
-      setState(() => _connected = true);
+      setState(() {
+        _connected = true;
+        _initializing = false;
+        _reconnecting = false;
+        _reconnectAttempt = 0;
+      });
       _addLine(TerminalLine(type: TerminalLineType.text, content: 'Connected to mo-code daemon'));
+
+      // Cancel any pending reconnect timer.
+      _reconnectTimer?.cancel();
+
+      // Re-subscribe to streams (cancel old ones first).
+      _messageSub?.cancel();
+      _connectionSub?.cancel();
 
       _messageSub = api.messages.listen(_handleEvent);
       _connectionSub = api.connection.listen((c) {
         if (!mounted) return;
+        final wasConnected = _connected;
         setState(() => _connected = c);
-        if (!c) {
+        if (!c && wasConnected) {
           _addLine(TerminalLine(type: TerminalLineType.error, content: 'Disconnected from server'));
+          _scheduleReconnect();
         }
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _connected = false);
-      _addLine(TerminalLine(type: TerminalLineType.error, content: 'Connection failed: $e'));
+      setState(() {
+        _connected = false;
+        _initializing = false;
+      });
+      if (_reconnectAttempt == 0) {
+        _addLine(TerminalLine(type: TerminalLineType.error, content: 'Connection failed: $e'));
+      }
+      _scheduleReconnect();
     }
+  }
+
+  void _scheduleReconnect() {
+    if (_reconnecting) return; // already scheduled
+    _reconnectTimer?.cancel();
+    setState(() => _reconnecting = true);
+
+    // Exponential backoff: 1s, 2s, 4s, 8s, ... capped at 30s.
+    _reconnectAttempt++;
+    final delaySec = min(pow(2, _reconnectAttempt - 1).toInt(), _maxReconnectDelay.inSeconds);
+    _reconnectTimer = Timer(Duration(seconds: delaySec), () {
+      if (!mounted) return;
+      _attemptConnect();
+    });
+  }
+
+  void _manualRetry() {
+    _reconnectTimer?.cancel();
+    setState(() {
+      _reconnecting = true;
+      _reconnectAttempt = 0;
+    });
+    _attemptConnect();
   }
 
   void _handleEvent(Map<String, dynamic> event) {
@@ -119,6 +173,12 @@ class _AgentScreenState extends State<AgentScreen> {
               break;
             case 'error':
               _addLine(TerminalLine(type: TerminalLineType.error, content: content));
+              break;
+            case 'diff':
+              _handleDiffEvent(metadata);
+              break;
+            case 'todo_update':
+              _handleTodoEvent(metadata);
               break;
             case 'done':
               // Stream is done, but task.complete will handle the UI update.
@@ -206,6 +266,39 @@ class _AgentScreenState extends State<AgentScreen> {
       _addLine(TerminalLine(type: TerminalLineType.text, content: preview));
       _addLine(TerminalLine(type: TerminalLineType.text, content: '  ... ($hidden more lines)'));
     }
+  }
+
+  void _handleDiffEvent(Map<String, dynamic> metadata) {
+    final diffData = DiffFile.fromJson(metadata);
+    _addLine(TerminalLine(
+      type: TerminalLineType.diff,
+      diffData: diffData,
+    ));
+  }
+
+  void _handleTodoEvent(Map<String, dynamic> metadata) {
+    final rawItems = metadata['items'] as List<dynamic>? ?? [];
+    final items = rawItems
+        .map((i) => TodoItem.fromJson(i as Map<String, dynamic>))
+        .toList();
+
+    // Update in-place if there's already a todo panel, otherwise add new.
+    setState(() {
+      final existingIdx = _lines.lastIndexWhere(
+        (l) => l.type == TerminalLineType.todo,
+      );
+      if (existingIdx >= 0) {
+        _lines[existingIdx] = TerminalLine(
+          type: TerminalLineType.todo,
+          todoItems: items,
+        );
+      } else {
+        _lines.add(TerminalLine(
+          type: TerminalLineType.todo,
+          todoItems: items,
+        ));
+      }
+    });
   }
 
   // --- Slash command definitions ---
@@ -406,11 +499,22 @@ class _AgentScreenState extends State<AgentScreen> {
         child: Column(
           children: [
             _buildStatusBar(),
+            // Connection banner — shown when disconnected (after initial connect).
+            if (!_connected && !_initializing)
+              ConnectionBanner(
+                isReconnecting: _reconnecting,
+                attemptNumber: _reconnectAttempt > 0 ? _reconnectAttempt : null,
+                onRetry: _manualRetry,
+              ),
             ProviderSwitcher(
               activeProvider: _activeProvider,
               onSwitch: _onProviderSwitch,
             ),
-            Expanded(child: TerminalOutput(lines: _lines)),
+            Expanded(
+              child: _initializing
+                  ? _buildInitialLoading()
+                  : TerminalOutput(lines: _lines),
+            ),
             InputBar(
               onSubmit: _onSubmit,
               disabled: !_connected,
@@ -420,6 +524,38 @@ class _AgentScreenState extends State<AgentScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildInitialLoading() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          ShimmerLoading(
+            child: Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.terminal, color: AppColors.purple, size: 28),
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Connecting to daemon...',
+            style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+          ),
+          const SizedBox(height: 8),
+          const SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.purple),
+          ),
+        ],
       ),
     );
   }
@@ -441,25 +577,96 @@ class _AgentScreenState extends State<AgentScreen> {
           ),
           Row(
             children: [
-              Container(
-                width: 6,
-                height: 6,
-                margin: const EdgeInsets.only(right: 6),
-                decoration: BoxDecoration(
-                  color: _connected ? AppColors.green : AppColors.red,
-                  shape: BoxShape.circle,
-                ),
-              ),
+              _ConnectionDot(connected: _connected, reconnecting: _reconnecting),
+              const SizedBox(width: 6),
               Text(
-                _connected ? _activeProvider : 'disconnected',
+                _connected
+                    ? _activeProvider
+                    : _reconnecting
+                        ? 'reconnecting'
+                        : 'disconnected',
                 style: TextStyle(
-                  color: _connected ? AppColors.green : AppColors.textMuted,
+                  color: _connected
+                      ? AppColors.green
+                      : _reconnecting
+                          ? AppColors.amber
+                          : AppColors.textMuted,
                   fontSize: 12,
                 ),
               ),
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Animated connection dot — pulses amber when reconnecting.
+class _ConnectionDot extends StatefulWidget {
+  final bool connected;
+  final bool reconnecting;
+  const _ConnectionDot({required this.connected, required this.reconnecting});
+
+  @override
+  State<_ConnectionDot> createState() => _ConnectionDotState();
+}
+
+class _ConnectionDotState extends State<_ConnectionDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulse = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    );
+    if (widget.reconnecting) _pulse.repeat(reverse: true);
+  }
+
+  @override
+  void didUpdateWidget(_ConnectionDot old) {
+    super.didUpdateWidget(old);
+    if (widget.reconnecting && !old.reconnecting) {
+      _pulse.repeat(reverse: true);
+    } else if (!widget.reconnecting && old.reconnecting) {
+      _pulse.stop();
+      _pulse.value = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = widget.connected
+        ? AppColors.green
+        : widget.reconnecting
+            ? AppColors.amber
+            : AppColors.red;
+
+    if (!widget.reconnecting) {
+      return Container(
+        width: 6,
+        height: 6,
+        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+      );
+    }
+
+    return FadeTransition(
+      opacity: Tween<double>(begin: 0.3, end: 1.0).animate(
+        CurvedAnimation(parent: _pulse, curve: Curves.easeInOut),
+      ),
+      child: Container(
+        width: 6,
+        height: 6,
+        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
       ),
     );
   }

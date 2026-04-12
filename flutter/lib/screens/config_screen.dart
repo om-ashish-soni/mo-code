@@ -1,7 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../api/daemon.dart';
 import '../theme/colors.dart';
+import '../widgets/shimmer_loading.dart';
+import '../widgets/connection_banner.dart';
 
 class ConfigScreen extends StatefulWidget {
   const ConfigScreen({super.key});
@@ -17,9 +20,16 @@ class _ConfigScreenState extends State<ConfigScreen> {
 
   String _activeProvider = 'claude';
   Map<String, bool> _providerConfigured = {};
-  bool _loading = true;
-  String? _statusMessage;
   Map<String, dynamic>? _serverStatus;
+
+  // Loading / error states
+  bool _loading = true;
+  bool _loadFailed = false;
+  String? _loadError;
+
+  // Status toast
+  _StatusToast? _toast;
+  Timer? _toastTimer;
 
   // Copilot device auth state
   bool _copilotAuthInProgress = false;
@@ -38,13 +48,30 @@ class _ConfigScreenState extends State<ConfigScreen> {
     _claudeKeyController.dispose();
     _geminiKeyController.dispose();
     _workingDirController.dispose();
+    _toastTimer?.cancel();
     super.dispose();
   }
 
+  void _showToast(String message, {bool isError = false}) {
+    _toastTimer?.cancel();
+    setState(() => _toast = _StatusToast(message: message, isError: isError));
+    _toastTimer = Timer(Duration(seconds: isError ? 4 : 2), () {
+      if (mounted) setState(() => _toast = null);
+    });
+  }
+
   Future<void> _loadConfig() async {
+    setState(() {
+      _loading = true;
+      _loadFailed = false;
+      _loadError = null;
+    });
+
     final api = context.read<OpenCodeAPI>();
     final config = await api.fetchConfig();
     final status = await api.fetchStatus();
+
+    if (!mounted) return;
 
     if (config != null) {
       setState(() {
@@ -61,20 +88,15 @@ class _ConfigScreenState extends State<ConfigScreen> {
     } else {
       setState(() {
         _loading = false;
-        _statusMessage = 'Failed to load config. Is the daemon running?';
-      });
-      Future.delayed(const Duration(seconds: 4), () {
-        if (mounted) setState(() => _statusMessage = null);
+        _loadFailed = true;
+        _loadError = api.lastError ?? 'Failed to load config';
       });
     }
   }
 
   void _setApiKey(String provider, String key) {
     if (key.trim().isEmpty) {
-      setState(() => _statusMessage = 'API key cannot be empty');
-      Future.delayed(const Duration(seconds: 2), () {
-        if (mounted) setState(() => _statusMessage = null);
-      });
+      _showToast('API key cannot be empty', isError: true);
       return;
     }
     final api = context.read<OpenCodeAPI>();
@@ -86,13 +108,8 @@ class _ConfigScreenState extends State<ConfigScreen> {
         'value': key,
       },
     });
-    setState(() {
-      _statusMessage = '${provider.toUpperCase()} API key saved';
-      _providerConfigured[provider] = true;
-    });
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) setState(() => _statusMessage = null);
-    });
+    setState(() => _providerConfigured[provider] = true);
+    _showToast('${provider.toUpperCase()} API key saved');
   }
 
   void _switchProvider(String provider) {
@@ -104,13 +121,8 @@ class _ConfigScreenState extends State<ConfigScreen> {
         'provider': provider,
       },
     });
-    setState(() {
-      _activeProvider = provider;
-      _statusMessage = 'Switched to $provider';
-    });
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) setState(() => _statusMessage = null);
-    });
+    setState(() => _activeProvider = provider);
+    _showToast('Switched to $provider');
   }
 
   @override
@@ -129,43 +141,148 @@ class _ConfigScreenState extends State<ConfigScreen> {
         ],
       ),
       body: SelectionArea(
-        child: _loading
-            ? const Center(child: CircularProgressIndicator(color: AppColors.purple))
-            : ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  if (_statusMessage != null) _buildStatusBanner(),
-                  _buildServerInfo(),
-                  const SizedBox(height: 20),
-                  _buildProviderSelector(),
-                  const SizedBox(height: 20),
-                  _buildApiKeySection('claude', 'Claude (Anthropic)', _claudeKeyController, 'sk-ant-...'),
-                  const SizedBox(height: 12),
-                  _buildApiKeySection('gemini', 'Gemini (Google)', _geminiKeyController, 'AIza...'),
-                  const SizedBox(height: 12),
-                  _buildCopilotAuthSection(),
-                  const SizedBox(height: 20),
-                  _buildWorkingDirSection(),
-                ],
-              ),
+        child: _buildBody(),
       ),
     );
   }
 
-  Widget _buildStatusBanner() {
+  Widget _buildBody() {
+    if (_loading) return _buildLoadingSkeleton();
+
+    if (_loadFailed) {
+      return ErrorStateWidget(
+        message: 'Could not load configuration',
+        detail: _loadError,
+        onRetry: _loadConfig,
+        icon: Icons.settings_outlined,
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        if (_toast != null) _buildToastBanner(),
+        _buildServerInfo(),
+        const SizedBox(height: 20),
+        _buildProviderSelector(),
+        const SizedBox(height: 20),
+        _buildApiKeySection('claude', 'Claude (Anthropic)', _claudeKeyController, 'sk-ant-...'),
+        const SizedBox(height: 12),
+        _buildApiKeySection('gemini', 'Gemini (Google)', _geminiKeyController, 'AIza...'),
+        const SizedBox(height: 12),
+        _buildCopilotAuthSection(),
+        const SizedBox(height: 20),
+        _buildWorkingDirSection(),
+      ],
+    );
+  }
+
+  Widget _buildLoadingSkeleton() {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: ShimmerLoading(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Server info skeleton
+            Container(
+              height: 60,
+              decoration: BoxDecoration(
+                color: AppColors.panel,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.border),
+              ),
+              padding: const EdgeInsets.all(12),
+              child: const Row(
+                children: [
+                  ShimmerLine(width: 80, height: 14),
+                  Spacer(),
+                  ShimmerLine(width: 50, height: 10),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            // Provider selector skeleton
+            Container(
+              height: 80,
+              decoration: BoxDecoration(
+                color: AppColors.panel,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.border),
+              ),
+              padding: const EdgeInsets.all(12),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ShimmerLine(width: 100, height: 10),
+                  SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(child: ShimmerLine(height: 36)),
+                      SizedBox(width: 8),
+                      Expanded(child: ShimmerLine(height: 36)),
+                      SizedBox(width: 8),
+                      Expanded(child: ShimmerLine(height: 36)),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            // API key sections skeleton
+            for (var i = 0; i < 3; i++) ...[
+              Container(
+                height: 90,
+                decoration: BoxDecoration(
+                  color: AppColors.panel,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppColors.border),
+                ),
+                padding: const EdgeInsets.all(12),
+                child: const Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ShimmerLine(width: 120, height: 12),
+                    SizedBox(height: 12),
+                    ShimmerLine(height: 40),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildToastBanner() {
+    final isError = _toast!.isError;
+    final color = isError ? AppColors.red : AppColors.green;
+    final icon = isError ? Icons.error_outline : Icons.check_circle;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: AppColors.green.withAlpha(30),
+        color: color.withAlpha(30),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.green.withAlpha(80)),
+        border: Border.all(color: color.withAlpha(80)),
       ),
       child: Row(
         children: [
-          const Icon(Icons.check_circle, color: AppColors.green, size: 16),
+          Icon(icon, color: color, size: 16),
           const SizedBox(width: 8),
-          Text(_statusMessage!, style: const TextStyle(color: AppColors.green, fontSize: 13)),
+          Expanded(
+            child: Text(
+              _toast!.message,
+              style: TextStyle(color: color, fontSize: 13),
+            ),
+          ),
+          GestureDetector(
+            onTap: () => setState(() => _toast = null),
+            child: Icon(Icons.close, color: color.withAlpha(120), size: 14),
+          ),
         ],
       ),
     );
@@ -449,14 +566,11 @@ class _ConfigScreenState extends State<ConfigScreen> {
     setState(() => _copilotAuthInProgress = true);
 
     final deviceResp = await api.startCopilotAuth();
+    if (!mounted) return;
+
     if (deviceResp == null) {
-      setState(() {
-        _copilotAuthInProgress = false;
-        _statusMessage = 'Failed to start Copilot auth';
-      });
-      Future.delayed(const Duration(seconds: 3), () {
-        if (mounted) setState(() => _statusMessage = null);
-      });
+      setState(() => _copilotAuthInProgress = false);
+      _showToast('Failed to start Copilot auth', isError: true);
       return;
     }
 
@@ -489,22 +603,16 @@ class _ConfigScreenState extends State<ConfigScreen> {
           _copilotUserCode = null;
           _copilotDeviceCode = null;
           _providerConfigured['copilot'] = true;
-          _statusMessage = 'Copilot authenticated!';
         });
-        Future.delayed(const Duration(seconds: 2), () {
-          if (mounted) setState(() => _statusMessage = null);
-        });
+        _showToast('Copilot authenticated!');
         return;
       } else if (status == 'failed') {
         setState(() {
           _copilotAuthInProgress = false;
           _copilotUserCode = null;
           _copilotDeviceCode = null;
-          _statusMessage = 'Auth failed: ${result['error'] ?? 'unknown'}';
         });
-        Future.delayed(const Duration(seconds: 3), () {
-          if (mounted) setState(() => _statusMessage = null);
-        });
+        _showToast('Auth failed: ${result['error'] ?? 'unknown'}', isError: true);
         return;
       }
       // pending — keep polling
@@ -516,11 +624,8 @@ class _ConfigScreenState extends State<ConfigScreen> {
         _copilotAuthInProgress = false;
         _copilotUserCode = null;
         _copilotDeviceCode = null;
-        _statusMessage = 'Auth timed out — try again';
       });
-      Future.delayed(const Duration(seconds: 3), () {
-        if (mounted) setState(() => _statusMessage = null);
-      });
+      _showToast('Auth timed out — try again', isError: true);
     }
   }
 
@@ -566,19 +671,21 @@ class _ConfigScreenState extends State<ConfigScreen> {
               const SizedBox(width: 8),
               ElevatedButton(
                 onPressed: () {
+                  final dir = _workingDirController.text.trim();
+                  if (dir.isEmpty) {
+                    _showToast('Directory cannot be empty', isError: true);
+                    return;
+                  }
                   final api = context.read<OpenCodeAPI>();
                   api.sendWsMessage({
                     'type': 'config.set',
                     'id': 'wd-${DateTime.now().millisecondsSinceEpoch}',
                     'payload': {
                       'key': 'working_dir',
-                      'value': _workingDirController.text.trim(),
+                      'value': dir,
                     },
                   });
-                  setState(() => _statusMessage = 'Working directory updated');
-                  Future.delayed(const Duration(seconds: 2), () {
-                    if (mounted) setState(() => _statusMessage = null);
-                  });
+                  _showToast('Working directory updated');
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.purple,
@@ -594,4 +701,10 @@ class _ConfigScreenState extends State<ConfigScreen> {
       ),
     );
   }
+}
+
+class _StatusToast {
+  final String message;
+  final bool isError;
+  const _StatusToast({required this.message, this.isError = false});
 }
