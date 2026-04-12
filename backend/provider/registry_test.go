@@ -21,9 +21,9 @@ func TestNewRegistryDefaults(t *testing.T) {
 		}
 	}
 
-	// Default active provider is claude.
-	if r.ActiveName() != "claude" {
-		t.Errorf("ActiveName() = %q, want claude", r.ActiveName())
+	// Default active provider is copilot.
+	if r.ActiveName() != "copilot" {
+		t.Errorf("ActiveName() = %q, want copilot", r.ActiveName())
 	}
 }
 
@@ -77,7 +77,7 @@ func TestRegistrySetActiveUnknown(t *testing.T) {
 		t.Fatal("expected error for unknown provider")
 	}
 	// Active should not have changed.
-	if r.ActiveName() != "claude" {
+	if r.ActiveName() != "copilot" {
 		t.Errorf("ActiveName() changed to %q after failed SetActive", r.ActiveName())
 	}
 }

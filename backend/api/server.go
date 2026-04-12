@@ -230,6 +230,7 @@ func (c *wsClient) serve() {
 		default:
 		}
 
+		log.Printf("[ws:recv] type=%s id=%s task_id=%s", raw.Type, raw.ID, raw.TaskID)
 		c.dispatch(raw)
 	}
 }
@@ -239,6 +240,18 @@ func (c *wsClient) serve() {
 func (c *wsClient) send(msg OutMessage) bool {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
+	// Log outgoing messages (truncate payload for readability).
+	if msg.Type == TypeAgentStream {
+		if p, ok := msg.Payload.(AgentStreamPayload); ok {
+			content := p.Content
+			if len(content) > 80 {
+				content = content[:80] + "..."
+			}
+			log.Printf("[ws:send] type=%s task=%s kind=%s content=%q", msg.Type, msg.TaskID, p.Kind, content)
+		}
+	} else {
+		log.Printf("[ws:send] type=%s id=%s task=%s", msg.Type, msg.ID, msg.TaskID)
+	}
 	if err := c.conn.WriteJSON(msg); err != nil {
 		log.Printf("ws write error: %v", err)
 		return false

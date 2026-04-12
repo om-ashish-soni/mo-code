@@ -39,5 +39,12 @@ daemon.log
 # Generated/runtime
 daemon_port
 
+# Scratch/test clones
+backend/headless-twitter/
+backend/headless-twitter-2/
+backend/tweet2/
+backend/twitter/
+backend/storage/
+
 # Flutter SDK
 flutter_linux_*.tar.xz

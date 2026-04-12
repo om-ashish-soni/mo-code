@@ -27,6 +27,10 @@ type Gemini struct {
 // NewGemini creates a new Gemini provider instance.
 func NewGemini() *Gemini {
 	return &Gemini{
+		config: Config{
+			Model:     geminiDefaultModel,
+			MaxTokens: geminiMaxTokensDefault,
+		},
 		client: &http.Client{},
 	}
 }

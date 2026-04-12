@@ -20,7 +20,7 @@ func NewRegistry() *Registry {
 			"gemini":  NewGemini(),
 			"copilot": NewCopilot(),
 		},
-		active: "claude",
+		active: "copilot",
 	}
 }
 

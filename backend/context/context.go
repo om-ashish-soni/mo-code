@@ -194,12 +194,13 @@ func BuildSystemPrompt(workingDir string, toolNames []string) string {
 	sb.WriteString("\n")
 
 	sb.WriteString("Guidelines:\n")
-	sb.WriteString("- Read files before modifying them to understand context.\n")
-	sb.WriteString("- Use file_list to explore the project structure.\n")
-	sb.WriteString("- Run builds and tests after making changes.\n")
-	sb.WriteString("- Explain your reasoning before taking action.\n")
-	sb.WriteString("- Keep responses concise and focused.\n")
-	sb.WriteString("- If a task is ambiguous, ask for clarification.\n")
+	sb.WriteString("- Be efficient: don't list directories you already know. One file_list at the root is usually enough.\n")
+	sb.WriteString("- Read files before modifying them.\n")
+	sb.WriteString("- Use shell_exec for git, build, and test commands.\n")
+	sb.WriteString("- Keep responses concise — don't narrate every step.\n")
+	sb.WriteString("- When asked to clone a repo, use shell_exec with git clone.\n")
+	sb.WriteString("- When asked to raise a PR, use shell_exec with git and gh CLI commands.\n")
+	sb.WriteString("- Avoid redundant tool calls — if you already have the info, don't re-fetch it.\n")
 
 	return sb.String()
 }

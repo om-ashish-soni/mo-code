@@ -128,25 +128,27 @@ class _ConfigScreenState extends State<ConfigScreen> {
           ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator(color: AppColors.purple))
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                if (_statusMessage != null) _buildStatusBanner(),
-                _buildServerInfo(),
-                const SizedBox(height: 20),
-                _buildProviderSelector(),
-                const SizedBox(height: 20),
-                _buildApiKeySection('claude', 'Claude (Anthropic)', _claudeKeyController, 'sk-ant-...'),
-                const SizedBox(height: 12),
-                _buildApiKeySection('gemini', 'Gemini (Google)', _geminiKeyController, 'AIza...'),
-                const SizedBox(height: 12),
-                _buildCopilotAuthSection(),
-                const SizedBox(height: 20),
-                _buildWorkingDirSection(),
-              ],
-            ),
+      body: SelectionArea(
+        child: _loading
+            ? const Center(child: CircularProgressIndicator(color: AppColors.purple))
+            : ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  if (_statusMessage != null) _buildStatusBanner(),
+                  _buildServerInfo(),
+                  const SizedBox(height: 20),
+                  _buildProviderSelector(),
+                  const SizedBox(height: 20),
+                  _buildApiKeySection('claude', 'Claude (Anthropic)', _claudeKeyController, 'sk-ant-...'),
+                  const SizedBox(height: 12),
+                  _buildApiKeySection('gemini', 'Gemini (Google)', _geminiKeyController, 'AIza...'),
+                  const SizedBox(height: 12),
+                  _buildCopilotAuthSection(),
+                  const SizedBox(height: 20),
+                  _buildWorkingDirSection(),
+                ],
+              ),
+      ),
     );
   }
 

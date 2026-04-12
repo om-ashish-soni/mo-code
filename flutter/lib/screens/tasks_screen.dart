@@ -69,11 +69,13 @@ class _TasksScreenState extends State<TasksScreen> {
           ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator(color: AppColors.purple))
-          : _sessions.isEmpty
-              ? _buildEmptyState()
-              : _buildSessionList(),
+      body: SelectionArea(
+        child: _loading
+            ? const Center(child: CircularProgressIndicator(color: AppColors.purple))
+            : _sessions.isEmpty
+                ? _buildEmptyState()
+                : _buildSessionList(),
+      ),
     );
   }
 

@@ -28,6 +28,10 @@ type Claude struct {
 // NewClaude creates a new Claude provider instance.
 func NewClaude() *Claude {
 	return &Claude{
+		config: Config{
+			Model:     claudeDefaultModel,
+			MaxTokens: claudeMaxTokensDefault,
+		},
 		client: &http.Client{},
 	}
 }

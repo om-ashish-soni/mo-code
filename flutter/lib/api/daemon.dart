@@ -18,6 +18,7 @@ class OpenCodeAPI {
   // Track subscriptions + channels for cleanup
   WebSocketChannel? _eventChannel;
   StreamSubscription? _eventSubscription;
+  int _msgCounter = 0;
 
   final _messagesController = StreamController<Map<String, dynamic>>.broadcast();
   final _connectionController = StreamController<bool>.broadcast();
@@ -41,6 +42,8 @@ class OpenCodeAPI {
     final paths = [
       portFilePath,
       './daemon_port',
+      '../daemon_port',
+      '../backend/daemon_port',
       '/data/data/com.mocode.app/daemon_port',
     ].whereType<String>();
 
@@ -399,19 +402,46 @@ class OpenCodeAPI {
     }
   }
 
-  // --- Cancel/Stop task ---
+  // --- WebSocket message sending ---
 
-  Future<bool> cancelSession(String sessionId) async {
-    try {
-      final resp = await http.post(
-        Uri.parse('$_baseUrl/session/$sessionId/cancel'),
-        headers: _authHeaders,
-      );
-      return resp.statusCode == 200 || resp.statusCode == 204;
-    } catch (e) {
-      debugPrint('Cancel session failed: $e');
+  /// Send a JSON message over the active WebSocket connection.
+  bool sendWsJson(Map<String, dynamic> message) {
+    if (_eventChannel == null) {
+      debugPrint('sendWsJson: no WebSocket connection');
       return false;
     }
+    try {
+      _eventChannel!.sink.add(jsonEncode(message));
+      return true;
+    } catch (e) {
+      debugPrint('sendWsJson failed: $e');
+      return false;
+    }
+  }
+
+  /// Send a task.start message over WebSocket to begin an agent task.
+  String? startTask(String prompt, {String? provider, String? workingDir}) {
+    _msgCounter++;
+    final id = 'msg-$_msgCounter-${DateTime.now().millisecondsSinceEpoch}';
+    final sent = sendWsJson({
+      'type': 'task.start',
+      'id': id,
+      'payload': {
+        'prompt': prompt,
+        if (provider != null) 'provider': provider,
+        if (workingDir != null) 'working_dir': workingDir,
+      },
+    });
+    return sent ? id : null;
+  }
+
+  /// Send a task.cancel message over WebSocket.
+  bool cancelTask(String taskId) {
+    return sendWsJson({
+      'type': 'task.cancel',
+      'id': 'cancel-${DateTime.now().millisecondsSinceEpoch}',
+      'task_id': taskId,
+    });
   }
 
   Future<void> disconnect() async {

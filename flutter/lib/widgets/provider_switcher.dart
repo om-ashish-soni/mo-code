@@ -11,7 +11,7 @@ class ProviderSwitcher extends StatelessWidget {
     required this.onSwitch,
   });
 
-  static const _providers = ['claude', 'gemini', 'copilot'];
+  static const _providers = ['copilot', 'claude', 'gemini'];
 
   @override
   Widget build(BuildContext context) {

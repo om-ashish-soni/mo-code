@@ -31,6 +31,10 @@ type Copilot struct {
 // NewCopilot creates a new Copilot provider instance with device auth support.
 func NewCopilot() *Copilot {
 	return &Copilot{
+		config: Config{
+			Model:     copilotDefaultModel,
+			MaxTokens: copilotMaxTokensDefault,
+		},
 		client: &http.Client{},
 		auth:   NewCopilotAuth(),
 	}
@@ -211,6 +215,19 @@ func (co *Copilot) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- St
 	var leftover string
 	var totalInput, totalOutput int
 
+	// Accumulate streamed tool calls by index. OpenAI sends the id+name in
+	// the first chunk and argument deltas in subsequent chunks.
+	pendingTools := make(map[int]*ToolCall)
+
+	flushTools := func() {
+		for _, tc := range pendingTools {
+			if tc.Name != "" {
+				ch <- StreamChunk{ToolCall: tc}
+			}
+		}
+		pendingTools = make(map[int]*ToolCall)
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -236,6 +253,7 @@ func (co *Copilot) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- St
 				}
 				jsonData := strings.TrimPrefix(line, "data: ")
 				if jsonData == "[DONE]" {
+					flushTools()
 					ch <- StreamChunk{
 						Done: true,
 						Usage: &Usage{
@@ -265,23 +283,35 @@ func (co *Copilot) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- St
 						for _, tc := range toolCalls {
 							tcMap, _ := tc.(map[string]any)
 							fn, _ := tcMap["function"].(map[string]any)
+							idx := 0
+							if idxF, ok := tcMap["index"].(float64); ok {
+								idx = int(idxF)
+							}
 							id, _ := tcMap["id"].(string)
 							name, _ := fn["name"].(string)
 							args, _ := fn["arguments"].(string)
-							if name != "" || args != "" {
-								ch <- StreamChunk{
-									ToolCall: &ToolCall{
-										ID:   id,
-										Name: name,
-										Args: args,
-									},
+
+							existing, ok := pendingTools[idx]
+							if !ok {
+								pendingTools[idx] = &ToolCall{
+									ID:   id,
+									Name: name,
+									Args: args,
 								}
+							} else {
+								if id != "" {
+									existing.ID = id
+								}
+								if name != "" {
+									existing.Name = name
+								}
+								existing.Args += args
 							}
 						}
 					}
 
 					if reason, ok := choice["finish_reason"].(string); ok && reason != "" {
-						// Done signal
+						flushTools()
 					}
 				}
 
@@ -298,6 +328,7 @@ func (co *Copilot) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- St
 		}
 
 		if err != nil {
+			flushTools()
 			ch <- StreamChunk{
 				Done: true,
 				Usage: &Usage{

@@ -214,11 +214,11 @@ func (e *Engine) runLoop(
 		ctxMgr.AddMessage(assistantMsg)
 
 		// If no tool calls, we're done — the LLM gave a final text response.
+		// Don't repeat the content in the done event — it was already streamed.
 		if len(toolCalls) == 0 {
 			ch <- Event{
-				TaskID:  taskID,
-				Kind:    EventDone,
-				Content: textBuf.String(),
+				TaskID: taskID,
+				Kind:   EventDone,
 			}
 			e.setTaskState(taskID, StateCompleted)
 			return

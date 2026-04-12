@@ -64,13 +64,15 @@ class _TerminalOutputState extends State<TerminalOutput> {
 
   @override
   Widget build(BuildContext context) {
-    return ListView.builder(
-      controller: _scrollController,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      itemCount: widget.lines.length,
-      itemBuilder: (context, index) {
-        return _buildLine(widget.lines[index]);
-      },
+    return SelectionArea(
+      child: ListView.builder(
+        controller: _scrollController,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        itemCount: widget.lines.length,
+        itemBuilder: (context, index) {
+          return _buildLine(widget.lines[index]);
+        },
+      ),
     );
   }
 

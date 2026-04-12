@@ -17,13 +17,12 @@ class AgentScreen extends StatefulWidget {
 
 class _AgentScreenState extends State<AgentScreen> {
   final List<TerminalLine> _lines = [];
-  String _activeProvider = 'claude';
+  String _activeProvider = 'copilot';
   bool _connected = false;
   bool _taskRunning = false;
-  String? _sessionId;
+  String? _activeTaskId;
 
   // Track subscriptions for cleanup
-  StreamSubscription? _responseSub;
   StreamSubscription? _messageSub;
   StreamSubscription? _connectionSub;
 
@@ -35,7 +34,6 @@ class _AgentScreenState extends State<AgentScreen> {
 
   @override
   void dispose() {
-    _responseSub?.cancel();
     _messageSub?.cancel();
     _connectionSub?.cancel();
     super.dispose();
@@ -54,15 +52,6 @@ class _AgentScreenState extends State<AgentScreen> {
       setState(() => _connected = true);
       _addLine(TerminalLine(type: TerminalLineType.text, content: 'Connected to mo-code daemon'));
 
-      final session = await api.createSession(title: 'Mo-Code Mobile Session');
-      if (!mounted) return;
-      if (session != null) {
-        _sessionId = session;
-        setState(() {});
-        _addLine(TerminalLine(type: TerminalLineType.text, content: 'Session created: $_sessionId'));
-      }
-
-      _responseSub = api.responses.listen(_handleResponse);
       _messageSub = api.messages.listen(_handleEvent);
       _connectionSub = api.connection.listen((c) {
         if (!mounted) return;
@@ -75,69 +64,6 @@ class _AgentScreenState extends State<AgentScreen> {
       if (!mounted) return;
       setState(() => _connected = false);
       _addLine(TerminalLine(type: TerminalLineType.error, content: 'Connection failed: $e'));
-    }
-  }
-
-  void _handleResponse(Map<String, dynamic> response) {
-    if (!mounted) return;
-    final info = response['info'] as Map<String, dynamic>?;
-    final parts = response['parts'] as List<dynamic>?;
-
-    if (parts != null && parts.isNotEmpty) {
-      try {
-        _processParts(parts.cast<Map<String, dynamic>>());
-      } catch (e) {
-        debugPrint('Failed to parse response parts: $e');
-      }
-    }
-    
-    if (info != null) {
-      final finish = info['finish'] as String?;
-      if (finish == 'stop' || finish == 'maxTokens') {
-        _addLine(TerminalLine(type: TerminalLineType.separator));
-        _addLine(TerminalLine(type: TerminalLineType.text, content: 'Task completed'));
-        setState(() => _taskRunning = false);
-      }
-    }
-  }
-
-  void _processParts(List<Map<String, dynamic>> parts) {
-    for (final part in parts) {
-      final partType = part['type'] as String?;
-      
-      switch (partType) {
-        case 'text':
-          final text = part['text'] as String? ?? '';
-          if (text.isNotEmpty) {
-            _addLine(TerminalLine(type: TerminalLineType.text, content: text));
-          }
-          break;
-        case 'tool_use':
-          final name = part['name'] as String? ?? 'unknown';
-          final input = part['input'] as Map<String, dynamic>?;
-          final path = input?['path'] as String?;
-          _addLine(TerminalLine(
-            type: TerminalLineType.toolCall, 
-            content: path != null ? '$name: $path' : name,
-          ));
-          break;
-        case 'tool_result':
-          final content = part['content'] as String? ?? '';
-          if (content.isNotEmpty) {
-            _addLine(TerminalLine(type: TerminalLineType.text, content: content));
-          }
-          break;
-        case 'step-start':
-          _addLine(TerminalLine(type: TerminalLineType.agentThinking, content: 'Thinking...'));
-          break;
-        case 'step-finish':
-          final tokens = part['tokens'] as Map<String, dynamic>?;
-          if (tokens != null) {
-            final total = tokens['total'] as int? ?? 0;
-            _addLine(TerminalLine(type: TerminalLineType.tokenCount, content: '$total tokens'));
-          }
-          break;
-      }
     }
   }
 
@@ -155,7 +81,7 @@ class _AgentScreenState extends State<AgentScreen> {
           switch (kind) {
             case 'text':
               if (content.isNotEmpty) {
-                _addLine(TerminalLine(type: TerminalLineType.text, content: content));
+                _appendText(content);
               }
               break;
             case 'tool_call':
@@ -163,7 +89,7 @@ class _AgentScreenState extends State<AgentScreen> {
               break;
             case 'tool_result':
               if (content.isNotEmpty) {
-                _addLine(TerminalLine(type: TerminalLineType.text, content: content));
+                _addToolResult(content);
               }
               break;
             case 'plan':
@@ -190,7 +116,10 @@ class _AgentScreenState extends State<AgentScreen> {
         } else {
           _addLine(TerminalLine(type: TerminalLineType.text, content: 'Task completed'));
         }
-        setState(() => _taskRunning = false);
+        setState(() {
+          _taskRunning = false;
+          _activeTaskId = null;
+        });
         break;
       case 'task.failed':
         if (payload is Map<String, dynamic>) {
@@ -199,14 +128,20 @@ class _AgentScreenState extends State<AgentScreen> {
         } else {
           _addLine(TerminalLine(type: TerminalLineType.error, content: 'Task failed'));
         }
-        setState(() => _taskRunning = false);
+        setState(() {
+          _taskRunning = false;
+          _activeTaskId = null;
+        });
         break;
       case 'error':
         if (payload is Map<String, dynamic>) {
           final message = payload['message'] as String? ?? 'Unknown error';
           _addLine(TerminalLine(type: TerminalLineType.error, content: message));
         }
-        setState(() => _taskRunning = false);
+        setState(() {
+          _taskRunning = false;
+          _activeTaskId = null;
+        });
         break;
       case 'config.current':
         // Config update broadcast — could refresh provider status
@@ -221,6 +156,34 @@ class _AgentScreenState extends State<AgentScreen> {
 
   void _addLine(TerminalLine line) {
     setState(() => _lines.add(line));
+  }
+
+  /// Append text to the last text line (for streaming), or create a new one.
+  void _appendText(String text) {
+    setState(() {
+      if (_lines.isNotEmpty && _lines.last.type == TerminalLineType.text) {
+        _lines[_lines.length - 1] = TerminalLine(
+          type: TerminalLineType.text,
+          content: _lines.last.content + text,
+        );
+      } else {
+        _lines.add(TerminalLine(type: TerminalLineType.text, content: text));
+      }
+    });
+  }
+
+  /// Show tool result truncated — max 6 lines, with a count if more.
+  void _addToolResult(String content) {
+    final lines = content.split('\n');
+    const maxLines = 6;
+    if (lines.length <= maxLines) {
+      _addLine(TerminalLine(type: TerminalLineType.text, content: content));
+    } else {
+      final preview = lines.take(maxLines).join('\n');
+      final hidden = lines.length - maxLines;
+      _addLine(TerminalLine(type: TerminalLineType.text, content: preview));
+      _addLine(TerminalLine(type: TerminalLineType.text, content: '  ... ($hidden more lines)'));
+    }
   }
 
   // --- Slash command definitions ---
@@ -276,9 +239,12 @@ class _AgentScreenState extends State<AgentScreen> {
         }
         return true;
       case '/session':
-        _addLine(TerminalLine(type: TerminalLineType.text, content: 'Session: ${_sessionId ?? "none"}'));
         _addLine(TerminalLine(type: TerminalLineType.text, content: 'Provider: $_activeProvider'));
         _addLine(TerminalLine(type: TerminalLineType.text, content: 'Connected: $_connected'));
+        _addLine(TerminalLine(type: TerminalLineType.text, content: 'Task running: $_taskRunning'));
+        if (_activeTaskId != null) {
+          _addLine(TerminalLine(type: TerminalLineType.text, content: 'Active task: $_activeTaskId'));
+        }
         return true;
       default:
         _addLine(TerminalLine(type: TerminalLineType.error, content: 'Unknown command: $command'));
@@ -289,15 +255,13 @@ class _AgentScreenState extends State<AgentScreen> {
 
   void _handleModelCommand(String modelName) {
     if (modelName.isEmpty) {
-      _addLine(TerminalLine(type: TerminalLineType.separator));
-      _addLine(TerminalLine(type: TerminalLineType.text, content: 'Models for $_activeProvider:'));
-      final models = _availableModels[_activeProvider] ?? [];
-      for (final m in models) {
-        _addLine(TerminalLine(type: TerminalLineType.planStep, content: '  $m'));
-      }
-      _addLine(TerminalLine(type: TerminalLineType.text, content: 'Usage: /model <name>'));
+      _showModelPicker();
       return;
     }
+    _selectModel(modelName);
+  }
+
+  void _selectModel(String modelName) {
     // Find which provider has this model
     String? resolvedProvider;
     for (final entry in _availableModels.entries) {
@@ -312,61 +276,98 @@ class _AgentScreenState extends State<AgentScreen> {
     _addLine(TerminalLine(type: TerminalLineType.text, content: 'Model set to: $modelName'));
   }
 
+  void _showModelPicker() {
+    final models = _availableModels[_activeProvider] ?? [];
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: AppColors.panel,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+            border: Border(
+              top: BorderSide(color: AppColors.border),
+              left: BorderSide(color: AppColors.border),
+              right: BorderSide(color: AppColors.border),
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                child: Text(
+                  'Models — $_activeProvider',
+                  style: const TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 12,
+                    fontFamily: 'JetBrainsMono',
+                  ),
+                ),
+              ),
+              const Divider(color: AppColors.border, height: 1),
+              ...models.map((model) => InkWell(
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _selectModel(model);
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Text(
+                    model,
+                    style: const TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: 14,
+                      fontFamily: 'JetBrainsMono',
+                    ),
+                  ),
+                ),
+              )),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   void _stopTask() {
     if (!_taskRunning) {
       _addLine(TerminalLine(type: TerminalLineType.text, content: 'No task running'));
       return;
     }
-    final api = context.read<OpenCodeAPI>();
-    if (_sessionId != null) {
-      api.cancelSession(_sessionId!);
+    if (_activeTaskId != null) {
+      final api = context.read<OpenCodeAPI>();
+      api.cancelTask(_activeTaskId!);
     }
-    setState(() => _taskRunning = false);
+    setState(() {
+      _taskRunning = false;
+      _activeTaskId = null;
+    });
     _addLine(TerminalLine(type: TerminalLineType.text, content: 'Task stopped'));
   }
 
-  void _onSubmit(String prompt) async {
+  void _onSubmit(String prompt) {
     // Handle slash commands locally (no login required)
     if (_handleSlashCommand(prompt)) return;
-
-    if (_sessionId == null) {
-      _addLine(TerminalLine(type: TerminalLineType.error, content: 'No session available'));
-      return;
-    }
 
     _addLine(TerminalLine(type: TerminalLineType.userInput, content: prompt));
     _addLine(TerminalLine(type: TerminalLineType.separator));
 
     final api = context.read<OpenCodeAPI>();
 
-    try {
-      String model;
-      switch (_activeProvider) {
-        case 'claude':
-          model = 'anthropic/claude-4-sonnet';
-          break;
-        case 'gemini':
-          model = 'google/gemini-2.5-pro';
-          break;
-        case 'copilot':
-          model = 'github-copilot/gpt-4o';
-          break;
-        default:
-          model = 'anthropic/claude-4-sonnet';
-      }
+    setState(() => _taskRunning = true);
+    _addLine(TerminalLine(type: TerminalLineType.agentThinking, content: 'Processing...'));
 
-      setState(() => _taskRunning = true);
-      _addLine(TerminalLine(type: TerminalLineType.agentThinking, content: 'Processing...'));
+    final taskId = api.startTask(prompt, provider: _activeProvider);
 
-      final result = await api.sendMessage(_sessionId!, prompt, model: model);
-
-      if (result == null) {
-        _addLine(TerminalLine(type: TerminalLineType.error, content: 'Failed to send message'));
-        setState(() => _taskRunning = false);
-      }
-    } catch (e) {
-      _addLine(TerminalLine(type: TerminalLineType.error, content: 'Error: $e'));
+    if (taskId == null) {
+      _addLine(TerminalLine(type: TerminalLineType.error, content: 'Failed to send task (no WebSocket connection)'));
       setState(() => _taskRunning = false);
+    } else {
+      _activeTaskId = taskId;
     }
   }
 
@@ -390,7 +391,7 @@ class _AgentScreenState extends State<AgentScreen> {
             Expanded(child: TerminalOutput(lines: _lines)),
             InputBar(
               onSubmit: _onSubmit,
-              disabled: !_connected || _sessionId == null,
+              disabled: !_connected,
               showMic: false,
               taskRunning: _taskRunning,
               onStop: _stopTask,

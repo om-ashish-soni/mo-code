@@ -13,7 +13,9 @@ import (
 )
 
 func main() {
-	portFile := filepath.Join(".", "daemon_port")
+	// Default port file: next to the binary, or project root via env.
+	execPath, _ := os.Executable()
+	portFile := filepath.Join(filepath.Dir(execPath), "daemon_port")
 	if envPortFile := os.Getenv("MOCODE_PORT_FILE"); envPortFile != "" {
 		portFile = envPortFile
 	}
@@ -33,7 +35,11 @@ func main() {
 	}
 
 	// Create the real agent engine.
+	// Use MOCODE_WORKDIR env or default to current directory.
 	workingDir, _ := os.Getwd()
+	if envDir := os.Getenv("MOCODE_WORKDIR"); envDir != "" {
+		workingDir = envDir
+	}
 	engine := agent.NewEngine(registry, workingDir)
 
 	server, err := api.Start(portFile, engine, registry)

@@ -74,7 +74,7 @@ class _FilesScreenState extends State<FilesScreen> {
           ),
         ],
       ),
-      body: Column(
+      body: SelectionArea(child: Column(
         children: [
           Container(
             padding: const EdgeInsets.all(12),
@@ -132,7 +132,7 @@ class _FilesScreenState extends State<FilesScreen> {
           if (_selectedFile != null && _fileContent != null)
             Expanded(child: _buildFileViewer()),
         ],
-      ),
+      )),
     );
   }
 

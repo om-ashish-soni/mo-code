@@ -89,7 +89,7 @@ func TestEngineTextOnlyResponse(t *testing.T) {
 		{TaskID: "test-1", Kind: EventText, Content: "Hello, "},
 		{TaskID: "test-1", Kind: EventText, Content: "world!"},
 		{TaskID: "test-1", Kind: EventTokenUsage, Metadata: map[string]any{"input": 10, "output": 5}},
-		{TaskID: "test-1", Kind: EventDone, Content: "Hello, world!"},
+		{TaskID: "test-1", Kind: EventDone},
 	}
 
 	if len(received) != len(expected) {
@@ -178,8 +178,8 @@ func TestEngineWithToolCalls(t *testing.T) {
 	if received[4].Content != "The file contains: hello world" {
 		t.Errorf("final text: %q", received[4].Content)
 	}
-	if received[6].Content != "The file contains: hello world" {
-		t.Errorf("done content: %q", received[6].Content)
+	if received[6].Kind != EventDone {
+		t.Errorf("expected done event, got: %s", received[6].Kind)
 	}
 }
 
@@ -259,8 +259,8 @@ func TestEngineInfo(t *testing.T) {
 	if info["working_dir"] != "/home/test" {
 		t.Fatalf("expected working dir /home/test, got %v", info["working_dir"])
 	}
-	if info["active_provider"] != "claude" {
-		t.Fatalf("expected active provider claude, got %v", info["active_provider"])
+	if info["active_provider"] != "copilot" {
+		t.Fatalf("expected active provider copilot, got %v", info["active_provider"])
 	}
 }
 
