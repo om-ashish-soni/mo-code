@@ -12,4 +12,9 @@ cd backend
 go test ./...
 
 echo ""
-echo "=== Go tests complete ==="
+echo "=== Running Dart analysis ==="
+cd "$PROJECT_DIR/flutter"
+dart analyze
+
+echo ""
+echo "=== All checks passed ==="

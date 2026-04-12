@@ -13,7 +13,7 @@ class ConfigScreen extends StatefulWidget {
 class _ConfigScreenState extends State<ConfigScreen> {
   final _claudeKeyController = TextEditingController();
   final _geminiKeyController = TextEditingController();
-  final _workingDirController = TextEditingController(text: '/mnt/linux_disk/opensource/mo-code');
+  final _workingDirController = TextEditingController();
 
   String _activeProvider = 'claude';
   Map<String, bool> _providerConfigured = {};
@@ -59,12 +59,24 @@ class _ConfigScreenState extends State<ConfigScreen> {
         _loading = false;
       });
     } else {
-      setState(() => _loading = false);
+      setState(() {
+        _loading = false;
+        _statusMessage = 'Failed to load config. Is the daemon running?';
+      });
+      Future.delayed(const Duration(seconds: 4), () {
+        if (mounted) setState(() => _statusMessage = null);
+      });
     }
   }
 
   void _setApiKey(String provider, String key) {
-    if (key.isEmpty) return;
+    if (key.trim().isEmpty) {
+      setState(() => _statusMessage = 'API key cannot be empty');
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) setState(() => _statusMessage = null);
+      });
+      return;
+    }
     final api = context.read<OpenCodeAPI>();
     api.sendWsMessage({
       'type': 'config.set',

@@ -187,9 +187,13 @@ type wsClient struct {
 	conn    *websocket.Conn
 	server  *Server
 	writeMu sync.Mutex
+	closed  chan struct{} // closed when connection ends
 }
 
 func (c *wsClient) serve() {
+	c.closed = make(chan struct{})
+	defer close(c.closed)
+
 	c.conn.SetReadLimit(1 << 20) // 1 MB
 	_ = c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 	c.conn.SetPongHandler(func(string) error {
@@ -229,12 +233,16 @@ func (c *wsClient) serve() {
 	}
 }
 
-func (c *wsClient) send(msg OutMessage) {
+// send writes a message to the WebSocket. Returns false if the write failed
+// (connection closed), so callers can stop sending.
+func (c *wsClient) send(msg OutMessage) bool {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
 	if err := c.conn.WriteJSON(msg); err != nil {
 		log.Printf("ws write error: %v", err)
+		return false
 	}
+	return true
 }
 
 func (c *wsClient) sendError(id string, code, message string) {
@@ -318,26 +326,37 @@ func (c *wsClient) handleTaskStart(raw RawMessage) {
 	}
 
 	// Stream events to the client in a goroutine.
+	// Stop when client disconnects (c.closed) to prevent goroutine leaks.
 	go func() {
-		for evt := range events {
-			c.send(OutMessage{
-				Type:   TypeAgentStream,
-				TaskID: evt.TaskID,
-				Payload: AgentStreamPayload{
-					Kind:      string(evt.Kind),
-					Content:   evt.Content,
-					Timestamp: time.Now().UTC().Format(time.RFC3339),
-				},
-			})
+		for {
+			select {
+			case <-c.closed:
+				return
+			case evt, ok := <-events:
+				if !ok {
+					return
+				}
+				if !c.send(OutMessage{
+					Type:   TypeAgentStream,
+					TaskID: evt.TaskID,
+					Payload: AgentStreamPayload{
+						Kind:      string(evt.Kind),
+						Content:   evt.Content,
+						Timestamp: time.Now().UTC().Format(time.RFC3339),
+					},
+				}) {
+					return // connection closed
+				}
 
-			// Send completion/failure message when done.
-			if evt.Kind == agent.EventDone {
-				info, _ := c.server.Tasks.CompletionInfo(evt.TaskID)
-				c.send(OutMessage{
-					Type:    TypeTaskComplete,
-					TaskID:  evt.TaskID,
-					Payload: info,
-				})
+				if evt.Kind == agent.EventDone {
+					info, _ := c.server.Tasks.CompletionInfo(evt.TaskID)
+					c.send(OutMessage{
+						Type:    TypeTaskComplete,
+						TaskID:  evt.TaskID,
+						Payload: info,
+					})
+					return
+				}
 			}
 		}
 	}()
@@ -397,23 +416,34 @@ func (c *wsClient) handleTaskRetry(raw RawMessage) {
 	}
 
 	go func() {
-		for evt := range events {
-			c.send(OutMessage{
-				Type:   TypeAgentStream,
-				TaskID: evt.TaskID,
-				Payload: AgentStreamPayload{
-					Kind:      string(evt.Kind),
-					Content:   evt.Content,
-					Timestamp: time.Now().UTC().Format(time.RFC3339),
-				},
-			})
-			if evt.Kind == agent.EventDone {
-				complInfo, _ := c.server.Tasks.CompletionInfo(evt.TaskID)
-				c.send(OutMessage{
-					Type:    TypeTaskComplete,
-					TaskID:  evt.TaskID,
-					Payload: complInfo,
-				})
+		for {
+			select {
+			case <-c.closed:
+				return
+			case evt, ok := <-events:
+				if !ok {
+					return
+				}
+				if !c.send(OutMessage{
+					Type:   TypeAgentStream,
+					TaskID: evt.TaskID,
+					Payload: AgentStreamPayload{
+						Kind:      string(evt.Kind),
+						Content:   evt.Content,
+						Timestamp: time.Now().UTC().Format(time.RFC3339),
+					},
+				}) {
+					return
+				}
+				if evt.Kind == agent.EventDone {
+					complInfo, _ := c.server.Tasks.CompletionInfo(evt.TaskID)
+					c.send(OutMessage{
+						Type:    TypeTaskComplete,
+						TaskID:  evt.TaskID,
+						Payload: complInfo,
+					})
+					return
+				}
 			}
 		}
 	}()
@@ -473,7 +503,9 @@ func (s *Server) handleCopilotDeviceAuth(w http.ResponseWriter, r *http.Request)
 
 	auth := s.Registry.CopilotAuth()
 	if auth == nil {
-		http.Error(w, `{"error":"copilot provider not available"}`, http.StatusServiceUnavailable)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "copilot provider not available"})
 		return
 	}
 
@@ -497,7 +529,9 @@ func (s *Server) handleCopilotPoll(w http.ResponseWriter, r *http.Request) {
 
 	auth := s.Registry.CopilotAuth()
 	if auth == nil {
-		http.Error(w, `{"error":"copilot provider not available"}`, http.StatusServiceUnavailable)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "copilot provider not available"})
 		return
 	}
 

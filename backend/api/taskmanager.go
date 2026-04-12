@@ -68,8 +68,14 @@ func (tm *TaskManager) StartTask(req agent.TaskRequest) (<-chan agent.Event, err
 	events, err := tm.runner.Start(ctx, req)
 	if err != nil {
 		tm.mu.Lock()
-		mt.state = agent.StateFailed
-		mt.errMsg = err.Error()
+		delete(tm.tasks, req.ID)
+		// Remove from order slice
+		for i, id := range tm.order {
+			if id == req.ID {
+				tm.order = append(tm.order[:i], tm.order[i+1:]...)
+				break
+			}
+		}
 		tm.mu.Unlock()
 		cancel()
 		return nil, err

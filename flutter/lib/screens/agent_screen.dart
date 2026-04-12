@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../api/daemon.dart';
@@ -21,10 +22,23 @@ class _AgentScreenState extends State<AgentScreen> {
   bool _taskRunning = false;
   String? _sessionId;
 
+  // Track subscriptions for cleanup
+  StreamSubscription? _responseSub;
+  StreamSubscription? _messageSub;
+  StreamSubscription? _connectionSub;
+
   @override
   void initState() {
     super.initState();
     _initConnection();
+  }
+
+  @override
+  void dispose() {
+    _responseSub?.cancel();
+    _messageSub?.cancel();
+    _connectionSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _initConnection() async {
@@ -36,36 +50,45 @@ class _AgentScreenState extends State<AgentScreen> {
     final api = context.read<OpenCodeAPI>();
     try {
       await api.connect();
+      if (!mounted) return;
       setState(() => _connected = true);
-      _addLine(TerminalLine(type: TerminalLineType.text, content: 'Connected to OpenCode server'));
-      
+      _addLine(TerminalLine(type: TerminalLineType.text, content: 'Connected to mo-code daemon'));
+
       final session = await api.createSession(title: 'Mo-Code Mobile Session');
+      if (!mounted) return;
       if (session != null) {
         _sessionId = session;
         setState(() {});
         _addLine(TerminalLine(type: TerminalLineType.text, content: 'Session created: $_sessionId'));
       }
-      
-      api.responses.listen(_handleResponse);
-      api.messages.listen(_handleEvent);
-      api.connection.listen((c) {
+
+      _responseSub = api.responses.listen(_handleResponse);
+      _messageSub = api.messages.listen(_handleEvent);
+      _connectionSub = api.connection.listen((c) {
+        if (!mounted) return;
         setState(() => _connected = c);
         if (!c) {
           _addLine(TerminalLine(type: TerminalLineType.error, content: 'Disconnected from server'));
         }
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() => _connected = false);
       _addLine(TerminalLine(type: TerminalLineType.error, content: 'Connection failed: $e'));
     }
   }
 
   void _handleResponse(Map<String, dynamic> response) {
+    if (!mounted) return;
     final info = response['info'] as Map<String, dynamic>?;
     final parts = response['parts'] as List<dynamic>?;
-    
-    if (parts != null) {
-      _processParts(parts.cast<Map<String, dynamic>>());
+
+    if (parts != null && parts.isNotEmpty) {
+      try {
+        _processParts(parts.cast<Map<String, dynamic>>());
+      } catch (e) {
+        debugPrint('Failed to parse response parts: $e');
+      }
     }
     
     if (info != null) {

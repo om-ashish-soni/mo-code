@@ -1,16 +1,23 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 class OpenCodeAPI {
-  String _baseUrl = 'http://127.0.0.1:4096';
+  static const _defaultPort = 19280;
+
+  String _baseUrl = 'http://127.0.0.1:$_defaultPort';
   String? _username;
   String? _password;
   bool _connected = false;
   String? _sessionId;
   String? _lastError;
+
+  // Track subscriptions + channels for cleanup
+  WebSocketChannel? _eventChannel;
+  StreamSubscription? _eventSubscription;
 
   final _messagesController = StreamController<Map<String, dynamic>>.broadcast();
   final _connectionController = StreamController<bool>.broadcast();
@@ -29,6 +36,30 @@ class OpenCodeAPI {
     _password = password;
   }
 
+  /// Try to discover daemon port from port file, falling back to default.
+  Future<void> discoverPort({String? portFilePath}) async {
+    final paths = [
+      portFilePath,
+      './daemon_port',
+      '/data/data/com.mocode.app/daemon_port',
+    ].whereType<String>();
+
+    for (final path in paths) {
+      try {
+        final content = await File(path).readAsString();
+        final port = int.tryParse(content.trim());
+        if (port != null && port > 0) {
+          _baseUrl = 'http://127.0.0.1:$port';
+          debugPrint('Discovered daemon on port $port from $path');
+          return;
+        }
+      } catch (_) {
+        // file doesn't exist, try next
+      }
+    }
+    debugPrint('No port file found, using default port $_defaultPort');
+  }
+
   Map<String, String> get _authHeaders {
     if (_username == null || _password == null) return {};
     final creds = base64Encode(utf8.encode('$_username:$_password'));
@@ -41,9 +72,12 @@ class OpenCodeAPI {
   }
 
   Future<void> connect() async {
+    // Try port discovery before connecting
+    await discoverPort();
+
     try {
       final health = await fetchHealth();
-      if (health != null && health['healthy'] == true) {
+      if (health != null && (health['healthy'] == true || health['status'] == 'ok')) {
         _connected = true;
         _connectionController.add(true);
         _lastError = null;
@@ -60,32 +94,32 @@ class OpenCodeAPI {
   }
 
   void _startEventStream() {
+    // Clean up any previous subscription
+    _eventSubscription?.cancel();
+    _eventChannel?.sink.close();
+
     try {
-      final wsUrl = '${_baseUrl.replaceFirst('http', 'ws')}/global/event';
-      final channel = WebSocketChannel.connect(Uri.parse(wsUrl));
-      
-      channel.stream.listen(
+      final wsUrl = '${_baseUrl.replaceFirst('http', 'ws')}/ws';
+      _eventChannel = WebSocketChannel.connect(Uri.parse(wsUrl));
+
+      _eventSubscription = _eventChannel!.stream.listen(
         (data) {
           try {
-            final lines = (data as String).split('\n');
-            for (final line in lines) {
-              if (line.startsWith('data: ')) {
-                final json = jsonDecode(line.substring(6)) as Map<String, dynamic>;
-                final payload = json['payload'] as Map<String, dynamic>?;
-                if (payload != null) {
-                  _messagesController.add(payload);
-                }
-              }
-            }
+            final decoded = jsonDecode(data as String) as Map<String, dynamic>;
+            _messagesController.add(decoded);
           } catch (e) {
             debugPrint('Event parse error: $e');
           }
         },
         onError: (e) {
           debugPrint('Event stream error: $e');
+          _connected = false;
+          _connectionController.add(false);
         },
         onDone: () {
           debugPrint('Event stream closed');
+          _connected = false;
+          _connectionController.add(false);
         },
       );
     } catch (e) {
@@ -96,15 +130,17 @@ class OpenCodeAPI {
   Future<Map<String, dynamic>?> fetchHealth() async {
     try {
       final resp = await http.get(
-        Uri.parse('$_baseUrl/global/health'),
+        Uri.parse('$_baseUrl/api/health'),
         headers: _authHeaders,
       );
       if (resp.statusCode == 200) {
         return jsonDecode(resp.body) as Map<String, dynamic>;
       }
+      _lastError = 'Health check returned ${resp.statusCode}';
       return null;
     } catch (e) {
-      debugPrint('Health check failed: $e');
+      _lastError = 'Health check failed: $e';
+      debugPrint(_lastError!);
       return null;
     }
   }
@@ -121,9 +157,11 @@ class OpenCodeAPI {
         _sessionId = data['id'] as String?;
         return _sessionId;
       }
+      _lastError = 'Create session: HTTP ${resp.statusCode}';
       return null;
     } catch (e) {
-      debugPrint('Create session failed: $e');
+      _lastError = 'Create session failed: $e';
+      debugPrint(_lastError!);
       return null;
     }
   }
@@ -143,9 +181,11 @@ class OpenCodeAPI {
         _responseController.add(data);
         return data;
       }
+      _lastError = 'Send message: HTTP ${resp.statusCode}';
       return null;
     } catch (e) {
-      debugPrint('Send message failed: $e');
+      _lastError = 'Send message failed: $e';
+      debugPrint(_lastError!);
       return null;
     }
   }
@@ -162,7 +202,8 @@ class OpenCodeAPI {
       );
       return resp.statusCode == 204 ? {'status': 'queued'} : null;
     } catch (e) {
-      debugPrint('Send async message failed: $e');
+      _lastError = 'Send async message failed: $e';
+      debugPrint(_lastError!);
       return null;
     }
   }
@@ -258,9 +299,11 @@ class OpenCodeAPI {
       if (resp.statusCode == 200) {
         return jsonDecode(resp.body) as Map<String, dynamic>;
       }
+      _lastError = 'Fetch config: HTTP ${resp.statusCode}';
       return null;
     } catch (e) {
-      debugPrint('Fetch config failed: $e');
+      _lastError = 'Fetch config failed: $e';
+      debugPrint(_lastError!);
       return null;
     }
   }
@@ -274,41 +317,46 @@ class OpenCodeAPI {
       if (resp.statusCode == 200) {
         return jsonDecode(resp.body) as Map<String, dynamic>;
       }
+      _lastError = 'Fetch status: HTTP ${resp.statusCode}';
       return null;
     } catch (e) {
-      debugPrint('Fetch status failed: $e');
+      _lastError = 'Fetch status failed: $e';
+      debugPrint(_lastError!);
       return null;
     }
   }
 
-  /// Send a raw message via WebSocket (for config.set, provider.switch, etc.)
-  void sendWsMessage(Map<String, dynamic> message) {
-    // For now, route config/provider changes through HTTP POST
+  /// Send a raw message via HTTP POST (for config.set, provider.switch, etc.)
+  Future<bool> sendWsMessage(Map<String, dynamic> message) async {
     final type = message['type'] as String?;
     final payload = message['payload'] as Map<String, dynamic>?;
-    if (type == null || payload == null) return;
+    if (type == null || payload == null) return false;
 
     switch (type) {
       case 'config.set':
-        _postJson('/api/config', payload);
-        break;
+        return _postJson('/api/config', payload);
       case 'provider.switch':
-        _postJson('/api/provider/switch', payload);
-        break;
+        return _postJson('/api/provider/switch', payload);
       default:
         debugPrint('sendWsMessage: unsupported type $type');
+        return false;
     }
   }
 
-  Future<void> _postJson(String path, Map<String, dynamic> body) async {
+  Future<bool> _postJson(String path, Map<String, dynamic> body) async {
     try {
-      await http.post(
+      final resp = await http.post(
         Uri.parse('$_baseUrl$path'),
         headers: {'Content-Type': 'application/json', ..._authHeaders},
         body: jsonEncode(body),
       );
+      if (resp.statusCode >= 200 && resp.statusCode < 300) return true;
+      _lastError = 'POST $path: HTTP ${resp.statusCode}';
+      return false;
     } catch (e) {
-      debugPrint('POST $path failed: $e');
+      _lastError = 'POST $path failed: $e';
+      debugPrint(_lastError!);
+      return false;
     }
   }
 
@@ -323,9 +371,11 @@ class OpenCodeAPI {
       if (resp.statusCode == 200) {
         return jsonDecode(resp.body) as Map<String, dynamic>;
       }
+      _lastError = 'Start copilot auth: HTTP ${resp.statusCode}';
       return null;
     } catch (e) {
-      debugPrint('Start copilot auth failed: $e');
+      _lastError = 'Start copilot auth failed: $e';
+      debugPrint(_lastError!);
       return null;
     }
   }
@@ -340,9 +390,11 @@ class OpenCodeAPI {
       if (resp.statusCode == 200) {
         return jsonDecode(resp.body) as Map<String, dynamic>;
       }
+      _lastError = 'Poll copilot auth: HTTP ${resp.statusCode}';
       return null;
     } catch (e) {
-      debugPrint('Poll copilot auth failed: $e');
+      _lastError = 'Poll copilot auth failed: $e';
+      debugPrint(_lastError!);
       return null;
     }
   }
@@ -363,6 +415,10 @@ class OpenCodeAPI {
   }
 
   Future<void> disconnect() async {
+    _eventSubscription?.cancel();
+    _eventSubscription = null;
+    _eventChannel?.sink.close();
+    _eventChannel = null;
     _connected = false;
     _connectionController.add(false);
     _sessionId = null;

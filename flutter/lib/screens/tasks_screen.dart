@@ -173,7 +173,7 @@ class DirectoryPickerDialog extends StatefulWidget {
 }
 
 class _DirectoryPickerDialogState extends State<DirectoryPickerDialog> {
-  final _controller = TextEditingController(text: '/mnt/linux_disk/opensource/mo-code/flutter');
+  final _controller = TextEditingController();
 
   @override
   void dispose() {

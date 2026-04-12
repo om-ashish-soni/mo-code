@@ -1,31 +1,37 @@
 #!/bin/bash
-# Start OpenCode server and Flutter app
+# Start mo-code daemon
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPT_DIR"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+cd "$PROJECT_DIR"
 
-echo "Starting OpenCode server..."
+echo "Building mo-code daemon..."
+cd backend
+go build -o mocode ./cmd/mocode
 
-# Kill any existing server on port 4096
-lsof -ti:4096 | xargs -r kill -9 2>/dev/null || true
+# Kill any existing daemon
+pkill -f "./mocode" 2>/dev/null || true
+sleep 1
 
-# Start OpenCode in background
-nohup opencode serve --port 4096 > /tmp/opencode.log 2>&1 &
-OPENCODE_PID=$!
+echo "Starting mo-code daemon..."
+nohup ./mocode > "$PROJECT_DIR/daemon.log" 2>&1 &
+DAEMON_PID=$!
 
 # Wait for server to be ready
-echo "Waiting for OpenCode server..."
-for i in {1..30}; do
-    if curl -s http://127.0.0.1:4096/global/health > /dev/null 2>&1; then
-        echo "OpenCode server ready on port 4096"
+echo "Waiting for daemon..."
+for i in {1..15}; do
+    PORT=$(cat "$PROJECT_DIR/daemon_port" 2>/dev/null || echo "")
+    if [ -n "$PORT" ] && curl -s "http://127.0.0.1:$PORT/api/health" > /dev/null 2>&1; then
+        echo "mo-code daemon ready on port $PORT"
         break
     fi
     sleep 1
 done
 
-echo "OpenCode server PID: $OPENCODE_PID"
-echo "Log: /tmp/opencode.log"
+echo "Daemon PID: $DAEMON_PID"
+echo "Port file: $PROJECT_DIR/daemon_port"
+echo "Log: $PROJECT_DIR/daemon.log"
 echo ""
-echo "To stop: kill $OPENCODE_PID"
+echo "To stop: kill $DAEMON_PID"
