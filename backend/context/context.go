@@ -5,8 +5,13 @@ package context
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"mo-code/backend/provider"
 )
@@ -177,30 +182,78 @@ func (m *Manager) trimIfNeeded() {
 }
 
 // BuildSystemPrompt constructs a system prompt for the agent with
-// working directory context and tool information.
-func BuildSystemPrompt(workingDir string, toolNames []string) string {
+// per-provider tuning, XML-structured environment data, git context,
+// instruction file discovery, and tool information.
+func BuildSystemPrompt(workingDir string, toolNames []string, providerName string) string {
 	var sb strings.Builder
 
-	sb.WriteString("You are a coding agent running inside mo-code, a mobile AI coding assistant. ")
-	sb.WriteString("You help users with software engineering tasks: writing code, debugging, ")
-	sb.WriteString("running commands, and managing files.\n\n")
+	// 1. Per-provider core prompt (tone, conventions, workflow).
+	sb.WriteString(ProviderPrompt(providerName))
 
-	sb.WriteString(fmt.Sprintf("Working directory: %s\n\n", workingDir))
+	// 2. Environment block (XML structured for better LLM parsing).
+	sb.WriteString("\n<env>\n")
+	sb.WriteString(fmt.Sprintf("  Working directory: %s\n", workingDir))
+	sb.WriteString(fmt.Sprintf("  Platform: %s/%s\n", runtime.GOOS, runtime.GOARCH))
+	sb.WriteString(fmt.Sprintf("  Today's date: %s\n", time.Now().Format("2006-01-02")))
 
-	sb.WriteString("You have access to these tools:\n")
+	// Detect git repo.
+	if _, err := os.Stat(filepath.Join(workingDir, ".git")); err == nil {
+		sb.WriteString("  Is directory a git repo: yes\n")
+		// Include git status snapshot.
+		if status := gitShortStatus(workingDir); status != "" {
+			sb.WriteString(fmt.Sprintf("  Git status:\n%s\n", indentLines(status, "    ")))
+		}
+		// Include recent commits.
+		if log := gitRecentCommits(workingDir, 5); log != "" {
+			sb.WriteString(fmt.Sprintf("  Recent commits:\n%s\n", indentLines(log, "    ")))
+		}
+	} else {
+		sb.WriteString("  Is directory a git repo: no\n")
+	}
+	sb.WriteString("</env>\n")
+
+	// 3. Tool listing.
+	sb.WriteString("\nYou have access to these tools:\n")
 	for _, name := range toolNames {
 		sb.WriteString(fmt.Sprintf("- %s\n", name))
 	}
-	sb.WriteString("\n")
 
-	sb.WriteString("Guidelines:\n")
-	sb.WriteString("- Be efficient: don't list directories you already know. One file_list at the root is usually enough.\n")
-	sb.WriteString("- Read files before modifying them.\n")
-	sb.WriteString("- Use shell_exec for git, build, and test commands.\n")
-	sb.WriteString("- Keep responses concise — don't narrate every step.\n")
-	sb.WriteString("- When asked to clone a repo, use shell_exec with git clone.\n")
-	sb.WriteString("- When asked to raise a PR, use shell_exec with git and gh CLI commands.\n")
-	sb.WriteString("- Avoid redundant tool calls — if you already have the info, don't re-fetch it.\n")
+	// 4. Project instructions (CLAUDE.md, AGENTS.md, CONTEXT.md).
+	if instructions := DiscoverInstructions(workingDir); instructions != "" {
+		sb.WriteString("\n")
+		sb.WriteString(instructions)
+	}
 
 	return sb.String()
+}
+
+// gitShortStatus returns `git status --short --branch` output, or empty string.
+func gitShortStatus(dir string) string {
+	cmd := exec.Command("git", "--no-optional-locks", "status", "--short", "--branch")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// gitRecentCommits returns the last N commit one-liners, or empty string.
+func gitRecentCommits(dir string, n int) string {
+	cmd := exec.Command("git", "log", "--oneline", fmt.Sprintf("-%d", n))
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// indentLines prepends a prefix to each line of text.
+func indentLines(text, prefix string) string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		lines[i] = prefix + line
+	}
+	return strings.Join(lines, "\n")
 }

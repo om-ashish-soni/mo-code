@@ -138,7 +138,7 @@ func TestManagerNoSystemPrompt(t *testing.T) {
 }
 
 func TestBuildSystemPrompt(t *testing.T) {
-	prompt := BuildSystemPrompt("/home/user/project", []string{"file_read", "shell_exec"})
+	prompt := BuildSystemPrompt("/home/user/project", []string{"file_read", "shell_exec"}, "copilot")
 
 	if !strings.Contains(prompt, "/home/user/project") {
 		t.Fatalf("expected working dir in prompt, got: %s", prompt)
@@ -148,5 +148,35 @@ func TestBuildSystemPrompt(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "shell_exec") {
 		t.Fatalf("expected shell_exec in prompt, got: %s", prompt)
+	}
+}
+
+func TestBuildSystemPromptPerProvider(t *testing.T) {
+	// Each provider should get a different prompt.
+	copilotPrompt := BuildSystemPrompt("/tmp", []string{"grep"}, "copilot")
+	claudePrompt := BuildSystemPrompt("/tmp", []string{"grep"}, "claude")
+	geminiPrompt := BuildSystemPrompt("/tmp", []string{"grep"}, "gemini")
+
+	// All should contain env block.
+	for _, p := range []string{copilotPrompt, claudePrompt, geminiPrompt} {
+		if !strings.Contains(p, "<env>") {
+			t.Fatal("expected <env> block in prompt")
+		}
+		if !strings.Contains(p, "</env>") {
+			t.Fatal("expected </env> closing tag in prompt")
+		}
+	}
+
+	// Claude prompt should differ from Gemini.
+	if claudePrompt == geminiPrompt {
+		t.Fatal("claude and gemini prompts should differ")
+	}
+}
+
+func TestDiscoverInstructions(t *testing.T) {
+	// With a non-existent directory, should return empty.
+	result := DiscoverInstructions("/nonexistent/path/that/does/not/exist")
+	if result != "" {
+		t.Fatalf("expected empty instructions for non-existent path, got: %s", result)
 	}
 }

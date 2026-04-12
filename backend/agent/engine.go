@@ -64,7 +64,7 @@ func (e *Engine) Start(ctx context.Context, req TaskRequest) (<-chan Event, erro
 	// Set up tools and context.
 	dispatcher := tools.DefaultDispatcher(e.workingDir)
 	toolNames := dispatcher.Names()
-	systemPrompt := agentctx.BuildSystemPrompt(e.workingDir, toolNames)
+	systemPrompt := agentctx.BuildSystemPrompt(e.workingDir, toolNames, providerName)
 	ctxMgr := agentctx.NewManager(systemPrompt)
 
 	// Add the user prompt.
@@ -89,7 +89,8 @@ func (e *Engine) Start(ctx context.Context, req TaskRequest) (<-chan Event, erro
 
 	ch := make(chan Event, 64)
 
-	go e.runLoop(taskCtx, req.ID, p, dispatcher, ctxMgr, ch)
+	compactor := agentctx.NewCompactor(p)
+	go e.runLoop(taskCtx, req.ID, p, dispatcher, ctxMgr, compactor, ch)
 
 	return ch, nil
 }
@@ -126,6 +127,7 @@ func (e *Engine) runLoop(
 	p provider.Provider,
 	dispatcher *tools.Dispatcher,
 	ctxMgr *agentctx.Manager,
+	compactor *agentctx.Compactor,
 	ch chan<- Event,
 ) {
 	defer close(ch)
@@ -133,6 +135,23 @@ func (e *Engine) runLoop(
 	toolDefs := dispatcher.ToolDefs()
 
 	for round := 0; round < maxToolRounds; round++ {
+		// Check if context needs compaction before the next LLM call.
+		if compactor.ShouldCompact(ctxMgr) {
+			if err := compactor.Compact(ctx, ctxMgr); err != nil {
+				// Non-fatal: log and continue with FIFO trimming as fallback.
+				ch <- Event{
+					TaskID:  taskID,
+					Kind:    EventText,
+					Content: "[context compacted]\n",
+				}
+			} else {
+				ch <- Event{
+					TaskID:  taskID,
+					Kind:    EventText,
+					Content: "[context compacted]\n",
+				}
+			}
+		}
 		// Check context cancellation.
 		select {
 		case <-ctx.Done():
