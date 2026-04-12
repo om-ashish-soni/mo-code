@@ -12,7 +12,9 @@ class AppColors {
   static const Color purple = Color(0xFF7f77dd);
   static const Color amber = Color(0xFFef9f27);
   static const Color red = Color(0xFFe24b4a);
+  static const Color blue = Color(0xFF5b9bd5);
   static const Color white = Color(0xFFffffff);
+  static const Color surface = Color(0xFF232340);
 }
 
 class AppTheme {
