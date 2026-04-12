@@ -23,8 +23,9 @@ func NewFileRead(workDir string) *FileRead {
 func (f *FileRead) Name() string { return "file_read" }
 
 func (f *FileRead) Description() string {
-	return "Read the contents of a file. Returns the file contents as a string. " +
-		"Use this to examine source code, config files, or any text file."
+	return "Read the contents of a file with line numbers. " +
+		"You MUST read a file before editing it with file_edit. " +
+		"Supports offset and limit for reading specific sections of large files."
 }
 
 func (f *FileRead) Parameters() string {
@@ -125,8 +126,9 @@ func NewFileWrite(workDir string) *FileWrite {
 func (f *FileWrite) Name() string { return "file_write" }
 
 func (f *FileWrite) Description() string {
-	return "Write content to a file. Creates the file if it doesn't exist, " +
-		"or overwrites if it does. Creates parent directories as needed."
+	return "Create a new file or completely overwrite an existing file. " +
+		"Creates parent directories as needed. " +
+		"Prefer file_edit for modifying existing files — it only changes the targeted section."
 }
 
 func (f *FileWrite) Parameters() string {

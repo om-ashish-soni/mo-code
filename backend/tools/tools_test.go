@@ -48,8 +48,8 @@ func TestDispatcherToolDefs(t *testing.T) {
 func TestDefaultDispatcher(t *testing.T) {
 	d := DefaultDispatcher("/tmp")
 	names := d.Names()
-	if len(names) != 13 {
-		t.Fatalf("expected 13 default tools, got %d: %v", len(names), names)
+	if len(names) != 14 {
+		t.Fatalf("expected 14 default tools, got %d: %v", len(names), names)
 	}
 }
 

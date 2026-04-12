@@ -85,6 +85,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, call provider.ToolCall) Resul
 		}
 	}
 
+	// Apply output truncation to prevent context overflow.
+	output, _ = TruncateOutput(output)
+
 	result := Result{Output: output}
 
 	// Parse structured result if the tool returned JSON with metadata.
@@ -146,5 +149,6 @@ func DefaultDispatcher(workingDir string) *Dispatcher {
 	d.Register(NewGrep(workingDir))
 	d.Register(NewGlob(workingDir))
 	d.Register(NewFileEdit(workingDir))
+	d.Register(NewQuestion())
 	return d
 }
