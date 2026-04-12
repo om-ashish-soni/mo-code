@@ -78,6 +78,7 @@ class _AgentScreenState extends State<AgentScreen> {
         if (payload is Map<String, dynamic>) {
           final kind = payload['kind'] as String? ?? '';
           final content = payload['content'] as String? ?? '';
+          final metadata = payload['metadata'] as Map<String, dynamic>? ?? {};
           switch (kind) {
             case 'text':
               if (content.isNotEmpty) {
@@ -85,12 +86,30 @@ class _AgentScreenState extends State<AgentScreen> {
               }
               break;
             case 'tool_call':
-              _addLine(TerminalLine(type: TerminalLineType.toolCall, content: content));
+              final toolArgs = metadata['args'] as String? ?? '';
+              final display = toolArgs.isNotEmpty
+                  ? '$content($toolArgs)'
+                  : content;
+              _addLine(TerminalLine(type: TerminalLineType.toolCall, content: display));
               break;
             case 'tool_result':
               if (content.isNotEmpty) {
                 _addToolResult(content);
               }
+              break;
+            case 'token_usage':
+              final input = metadata['input'] ?? 0;
+              final output = metadata['output'] ?? 0;
+              _addLine(TerminalLine(
+                type: TerminalLineType.tokenCount,
+                content: 'tokens: $input in / $output out',
+              ));
+              break;
+            case 'file_create':
+              _addLine(TerminalLine(type: TerminalLineType.fileCreated, content: content));
+              break;
+            case 'file_modify':
+              _addLine(TerminalLine(type: TerminalLineType.fileModified, content: content));
               break;
             case 'plan':
               _addLine(TerminalLine(type: TerminalLineType.planStep, content: content));
@@ -100,6 +119,9 @@ class _AgentScreenState extends State<AgentScreen> {
               break;
             case 'error':
               _addLine(TerminalLine(type: TerminalLineType.error, content: content));
+              break;
+            case 'done':
+              // Stream is done, but task.complete will handle the UI update.
               break;
           }
         }
