@@ -34,6 +34,13 @@ func main() {
 		registry.Configure("copilot", provider.Config{APIKey: copilotKey})
 	}
 
+	// Load cached Copilot OAuth token from disk (persists across restarts).
+	if auth := registry.CopilotAuth(); auth != nil {
+		if auth.LoadToken() {
+			log.Println("Copilot: loaded cached OAuth token from ~/.mocode/copilot_token.json")
+		}
+	}
+
 	// Create the real agent engine.
 	// Use MOCODE_WORKDIR env or default to current directory.
 	workingDir, _ := os.Getwd()
