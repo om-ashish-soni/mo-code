@@ -13,7 +13,6 @@ class TasksScreen extends StatefulWidget {
 class _TasksScreenState extends State<TasksScreen> {
   List<Map<String, dynamic>> _sessions = [];
   bool _loading = false;
-  String? _selectedSession;
   String? _workingDir;
 
   @override
@@ -104,7 +103,6 @@ class _TasksScreenState extends State<TasksScreen> {
       itemCount: _sessions.length,
       itemBuilder: (context, index) {
         final session = _sessions[index];
-        final id = session['id'] as String? ?? '';
         final title = session['title'] as String? ?? 'Untitled';
         final time = session['time'] as Map<String, dynamic>?;
         final updated = time?['updated'] as int?;
@@ -115,7 +113,7 @@ class _TasksScreenState extends State<TasksScreen> {
           color: AppColors.panel,
           child: ListTile(
             onTap: () {
-              setState(() => _selectedSession = id);
+              // TODO: navigate to session detail view
             },
             leading: Container(
               width: 40,

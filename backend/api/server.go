@@ -125,6 +125,8 @@ func (s *Server) newMux() *http.ServeMux {
 	mux.HandleFunc("/api/health", handleHealth)
 	mux.HandleFunc("/api/config", s.Config.HandleHTTP)
 	mux.HandleFunc("/api/status", s.handleStatus)
+	mux.HandleFunc("/api/auth/copilot/device", s.handleCopilotDeviceAuth)
+	mux.HandleFunc("/api/auth/copilot/poll", s.handleCopilotPoll)
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	return mux
 }
@@ -458,6 +460,73 @@ func (c *wsClient) handleConfigSet(raw RawMessage) {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Copilot Device Auth HTTP handlers
+// ---------------------------------------------------------------------------
+
+func (s *Server) handleCopilotDeviceAuth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	auth := s.Registry.CopilotAuth()
+	if auth == nil {
+		http.Error(w, `{"error":"copilot provider not available"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	dcResp, err := auth.StartDeviceFlow(r.Context())
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(dcResp)
+}
+
+func (s *Server) handleCopilotPoll(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	auth := s.Registry.CopilotAuth()
+	if auth == nil {
+		http.Error(w, `{"error":"copilot provider not available"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	var req struct {
+		DeviceCode string `json:"device_code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.DeviceCode == "" {
+		http.Error(w, `{"error":"device_code is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	result, err := auth.PollForToken(r.Context(), req.DeviceCode)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	// If auth succeeded, exchange for Copilot API token immediately.
+	if result.Status == provider.PollSuccess {
+		if _, err := auth.ExchangeToken(r.Context()); err != nil {
+			log.Printf("copilot token exchange after auth: %v", err)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
+}
 
 func listenLocalhost(startPort, maxScan int) (net.Listener, int, error) {
 	for offset := 0; offset <= maxScan; offset++ {

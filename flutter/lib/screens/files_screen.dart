@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../api/daemon.dart';
 import '../theme/colors.dart';
-import '../models/messages.dart';
-
 class FilesScreen extends StatefulWidget {
   const FilesScreen({super.key});
 

@@ -19,7 +19,6 @@ class _AgentScreenState extends State<AgentScreen> {
   String _activeProvider = 'claude';
   bool _connected = false;
   bool _taskRunning = false;
-  String? _currentTaskId;
   String? _sessionId;
 
   @override
@@ -148,18 +147,122 @@ class _AgentScreenState extends State<AgentScreen> {
     setState(() => _lines.add(line));
   }
 
+  // --- Slash command definitions ---
+  static const _availableModels = {
+    'claude': ['claude-4-sonnet', 'claude-4-opus', 'claude-3.5-haiku'],
+    'gemini': ['gemini-2.5-pro', 'gemini-2.5-flash'],
+    'copilot': ['gpt-4o', 'claude-4-sonnet'],
+  };
+
+  static const _availableSkills = [
+    '/model <name>    — switch model (e.g. /model gemini-2.5-pro)',
+    '/skills          — list available slash commands',
+    '/stop            — stop current task',
+    '/clear           — clear terminal output',
+    '/provider <name> — switch provider (claude, gemini, copilot)',
+    '/session         — show current session info',
+  ];
+
+  bool _handleSlashCommand(String input) {
+    final trimmed = input.trim();
+    if (!trimmed.startsWith('/')) return false;
+
+    _addLine(TerminalLine(type: TerminalLineType.userInput, content: trimmed));
+
+    final parts = trimmed.split(' ');
+    final command = parts[0].toLowerCase();
+    final arg = parts.length > 1 ? parts.sublist(1).join(' ') : '';
+
+    switch (command) {
+      case '/model':
+        _handleModelCommand(arg);
+        return true;
+      case '/skills':
+      case '/help':
+        _addLine(TerminalLine(type: TerminalLineType.separator));
+        _addLine(TerminalLine(type: TerminalLineType.text, content: 'Available commands:'));
+        for (final skill in _availableSkills) {
+          _addLine(TerminalLine(type: TerminalLineType.planStep, content: skill));
+        }
+        return true;
+      case '/stop':
+        _stopTask();
+        return true;
+      case '/clear':
+        setState(() => _lines.clear());
+        return true;
+      case '/provider':
+        if (arg.isNotEmpty && ['claude', 'gemini', 'copilot'].contains(arg.toLowerCase())) {
+          _onProviderSwitch(arg.toLowerCase());
+        } else {
+          _addLine(TerminalLine(type: TerminalLineType.text, content: 'Active: $_activeProvider'));
+          _addLine(TerminalLine(type: TerminalLineType.text, content: 'Usage: /provider <claude|gemini|copilot>'));
+        }
+        return true;
+      case '/session':
+        _addLine(TerminalLine(type: TerminalLineType.text, content: 'Session: ${_sessionId ?? "none"}'));
+        _addLine(TerminalLine(type: TerminalLineType.text, content: 'Provider: $_activeProvider'));
+        _addLine(TerminalLine(type: TerminalLineType.text, content: 'Connected: $_connected'));
+        return true;
+      default:
+        _addLine(TerminalLine(type: TerminalLineType.error, content: 'Unknown command: $command'));
+        _addLine(TerminalLine(type: TerminalLineType.text, content: 'Type /skills to see available commands'));
+        return true;
+    }
+  }
+
+  void _handleModelCommand(String modelName) {
+    if (modelName.isEmpty) {
+      _addLine(TerminalLine(type: TerminalLineType.separator));
+      _addLine(TerminalLine(type: TerminalLineType.text, content: 'Models for $_activeProvider:'));
+      final models = _availableModels[_activeProvider] ?? [];
+      for (final m in models) {
+        _addLine(TerminalLine(type: TerminalLineType.planStep, content: '  $m'));
+      }
+      _addLine(TerminalLine(type: TerminalLineType.text, content: 'Usage: /model <name>'));
+      return;
+    }
+    // Find which provider has this model
+    String? resolvedProvider;
+    for (final entry in _availableModels.entries) {
+      if (entry.value.contains(modelName)) {
+        resolvedProvider = entry.key;
+        break;
+      }
+    }
+    if (resolvedProvider != null && resolvedProvider != _activeProvider) {
+      _onProviderSwitch(resolvedProvider);
+    }
+    _addLine(TerminalLine(type: TerminalLineType.text, content: 'Model set to: $modelName'));
+  }
+
+  void _stopTask() {
+    if (!_taskRunning) {
+      _addLine(TerminalLine(type: TerminalLineType.text, content: 'No task running'));
+      return;
+    }
+    final api = context.read<OpenCodeAPI>();
+    if (_sessionId != null) {
+      api.cancelSession(_sessionId!);
+    }
+    setState(() => _taskRunning = false);
+    _addLine(TerminalLine(type: TerminalLineType.text, content: 'Task stopped'));
+  }
+
   void _onSubmit(String prompt) async {
+    // Handle slash commands locally (no login required)
+    if (_handleSlashCommand(prompt)) return;
+
     if (_sessionId == null) {
       _addLine(TerminalLine(type: TerminalLineType.error, content: 'No session available'));
       return;
     }
-    
+
     _addLine(TerminalLine(type: TerminalLineType.userInput, content: prompt));
     _addLine(TerminalLine(type: TerminalLineType.separator));
-    
+
     final api = context.read<OpenCodeAPI>();
-    _currentTaskId = 'task-${DateTime.now().millisecondsSinceEpoch}';
-    
+
     try {
       String model;
       switch (_activeProvider) {
@@ -170,17 +273,17 @@ class _AgentScreenState extends State<AgentScreen> {
           model = 'google/gemini-2.5-pro';
           break;
         case 'copilot':
-          model = 'github-copilot/claude-4.5-sonnet';
+          model = 'github-copilot/gpt-4o';
           break;
         default:
           model = 'anthropic/claude-4-sonnet';
       }
-      
+
       setState(() => _taskRunning = true);
       _addLine(TerminalLine(type: TerminalLineType.agentThinking, content: 'Processing...'));
-      
+
       final result = await api.sendMessage(_sessionId!, prompt, model: model);
-      
+
       if (result == null) {
         _addLine(TerminalLine(type: TerminalLineType.error, content: 'Failed to send message'));
         setState(() => _taskRunning = false);
@@ -211,8 +314,10 @@ class _AgentScreenState extends State<AgentScreen> {
             Expanded(child: TerminalOutput(lines: _lines)),
             InputBar(
               onSubmit: _onSubmit,
-              disabled: _taskRunning || !_connected || _sessionId == null,
+              disabled: !_connected || _sessionId == null,
               showMic: false,
+              taskRunning: _taskRunning,
+              onStop: _stopTask,
             ),
           ],
         ),

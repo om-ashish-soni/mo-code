@@ -61,7 +61,7 @@ class OpenCodeAPI {
 
   void _startEventStream() {
     try {
-      final wsUrl = _baseUrl.replaceFirst('http', 'ws') + '/global/event';
+      final wsUrl = '${_baseUrl.replaceFirst('http', 'ws')}/global/event';
       final channel = WebSocketChannel.connect(Uri.parse(wsUrl));
       
       channel.stream.listen(
@@ -167,23 +167,6 @@ class OpenCodeAPI {
     }
   }
 
-  Future<List<Map<String, dynamic>>?> listSessions() async {
-    try {
-      final resp = await http.get(
-        Uri.parse('$_baseUrl/session'),
-        headers: _authHeaders,
-      );
-      if (resp.statusCode == 200) {
-        final data = jsonDecode(resp.body) as Map<String, dynamic>;
-        return (data['sessions'] as List?)?.cast<Map<String, dynamic>>();
-      }
-      return null;
-    } catch (e) {
-      debugPrint('List sessions failed: $e');
-      return null;
-    }
-  }
-
   Future<Map<String, dynamic>?> getFileContent(String path, {String? directory}) async {
     try {
       final encoded = Uri.encodeComponent(path);
@@ -261,6 +244,121 @@ class OpenCodeAPI {
     } catch (e) {
       debugPrint('List sessions failed: $e');
       return null;
+    }
+  }
+
+  // --- Config & Status (for ConfigScreen) ---
+
+  Future<Map<String, dynamic>?> fetchConfig() async {
+    try {
+      final resp = await http.get(
+        Uri.parse('$_baseUrl/api/config'),
+        headers: _authHeaders,
+      );
+      if (resp.statusCode == 200) {
+        return jsonDecode(resp.body) as Map<String, dynamic>;
+      }
+      return null;
+    } catch (e) {
+      debugPrint('Fetch config failed: $e');
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> fetchStatus() async {
+    try {
+      final resp = await http.get(
+        Uri.parse('$_baseUrl/api/status'),
+        headers: _authHeaders,
+      );
+      if (resp.statusCode == 200) {
+        return jsonDecode(resp.body) as Map<String, dynamic>;
+      }
+      return null;
+    } catch (e) {
+      debugPrint('Fetch status failed: $e');
+      return null;
+    }
+  }
+
+  /// Send a raw message via WebSocket (for config.set, provider.switch, etc.)
+  void sendWsMessage(Map<String, dynamic> message) {
+    // For now, route config/provider changes through HTTP POST
+    final type = message['type'] as String?;
+    final payload = message['payload'] as Map<String, dynamic>?;
+    if (type == null || payload == null) return;
+
+    switch (type) {
+      case 'config.set':
+        _postJson('/api/config', payload);
+        break;
+      case 'provider.switch':
+        _postJson('/api/provider/switch', payload);
+        break;
+      default:
+        debugPrint('sendWsMessage: unsupported type $type');
+    }
+  }
+
+  Future<void> _postJson(String path, Map<String, dynamic> body) async {
+    try {
+      await http.post(
+        Uri.parse('$_baseUrl$path'),
+        headers: {'Content-Type': 'application/json', ..._authHeaders},
+        body: jsonEncode(body),
+      );
+    } catch (e) {
+      debugPrint('POST $path failed: $e');
+    }
+  }
+
+  // --- Copilot Device Auth ---
+
+  Future<Map<String, dynamic>?> startCopilotAuth() async {
+    try {
+      final resp = await http.post(
+        Uri.parse('$_baseUrl/api/auth/copilot/device'),
+        headers: _authHeaders,
+      );
+      if (resp.statusCode == 200) {
+        return jsonDecode(resp.body) as Map<String, dynamic>;
+      }
+      return null;
+    } catch (e) {
+      debugPrint('Start copilot auth failed: $e');
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> pollCopilotAuth(String deviceCode) async {
+    try {
+      final resp = await http.post(
+        Uri.parse('$_baseUrl/api/auth/copilot/poll'),
+        headers: {'Content-Type': 'application/json', ..._authHeaders},
+        body: jsonEncode({'device_code': deviceCode}),
+      );
+      if (resp.statusCode == 200) {
+        return jsonDecode(resp.body) as Map<String, dynamic>;
+      }
+      return null;
+    } catch (e) {
+      debugPrint('Poll copilot auth failed: $e');
+      return null;
+    }
+  }
+
+  // --- Cancel/Stop task ---
+
+  Future<bool> cancelSession(String sessionId) async {
+    try {
+      final resp = await http.post(
+        Uri.parse('$_baseUrl/session/$sessionId/cancel'),
+        headers: _authHeaders,
+      );
+      return resp.statusCode == 200 || resp.statusCode == 204;
+    } catch (e) {
+      debugPrint('Cancel session failed: $e');
+      return false;
     }
   }
 

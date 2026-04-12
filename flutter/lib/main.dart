@@ -5,6 +5,7 @@ import 'theme/colors.dart';
 import 'screens/agent_screen.dart';
 import 'screens/files_screen.dart';
 import 'screens/tasks_screen.dart';
+import 'screens/config_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -43,6 +44,7 @@ class _MainScreenState extends State<MainScreen> {
     AgentScreen(),
     FilesScreen(),
     TasksScreen(),
+    ConfigScreen(),
   ];
 
   @override
@@ -69,6 +71,11 @@ class _MainScreenState extends State<MainScreen> {
             icon: Icon(Icons.list_alt_outlined, color: AppColors.textMuted),
             selectedIcon: Icon(Icons.list_alt, color: AppColors.purple),
             label: 'Tasks',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.settings_outlined, color: AppColors.textMuted),
+            selectedIcon: Icon(Icons.settings, color: AppColors.purple),
+            label: 'Config',
           ),
         ],
       ),

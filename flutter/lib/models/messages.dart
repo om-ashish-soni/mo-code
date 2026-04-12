@@ -56,7 +56,7 @@ class TerminalLine {
   final String content;
   final DateTime timestamp;
 
-  TerminalLine({required this.type, required this.content, DateTime? timestamp})
+  TerminalLine({required this.type, this.content = '', DateTime? timestamp})
       : timestamp = timestamp ?? DateTime.now();
 }
 

@@ -1,0 +1,43 @@
+# Binaries
+bin/
+backend/mocode
+
+# Go
+*.exe
+*.dylib
+*.so
+
+# Flutter/Dart
+*.lock
+.pub-cache/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+**/local.properties
+
+# Build artifacts
+build/
+dist/
+coverage/
+android/app/debug/
+android/app/profile/
+android/app/release/
+
+# Logs
+*.log
+daemon.log
+
+# IDE
+*.iml
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+*.swp
+
+# Generated/runtime
+daemon_port
+
+# Flutter SDK
+flutter_linux_*.tar.xz

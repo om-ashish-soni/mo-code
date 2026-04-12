@@ -5,12 +5,16 @@ class InputBar extends StatefulWidget {
   final Function(String) onSubmit;
   final bool disabled;
   final bool showMic;
+  final bool taskRunning;
+  final VoidCallback? onStop;
 
   const InputBar({
     super.key,
     required this.onSubmit,
     this.disabled = false,
     this.showMic = false,
+    this.taskRunning = false,
+    this.onStop,
   });
 
   @override
@@ -70,24 +74,40 @@ class _InputBarState extends State<InputBar> {
               icon: const Icon(Icons.mic, color: AppColors.textMuted, size: 20),
               onPressed: widget.disabled ? null : () {},
             ),
-          Container(
-            width: 28,
-            height: 28,
-            margin: const EdgeInsets.only(left: 8),
-            decoration: BoxDecoration(
-              color: _hasText && !widget.disabled ? AppColors.purple : AppColors.border,
-              shape: BoxShape.circle,
-            ),
-            child: IconButton(
-              padding: EdgeInsets.zero,
-              icon: Icon(
-                Icons.play_arrow,
-                color: _hasText && !widget.disabled ? AppColors.white : AppColors.textMuted,
-                size: 18,
+          if (widget.taskRunning && widget.onStop != null)
+            Container(
+              width: 28,
+              height: 28,
+              margin: const EdgeInsets.only(left: 8),
+              decoration: const BoxDecoration(
+                color: AppColors.red,
+                shape: BoxShape.circle,
               ),
-              onPressed: _hasText && !widget.disabled ? _submit : null,
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                icon: const Icon(Icons.stop, color: AppColors.white, size: 18),
+                onPressed: widget.onStop,
+              ),
+            )
+          else
+            Container(
+              width: 28,
+              height: 28,
+              margin: const EdgeInsets.only(left: 8),
+              decoration: BoxDecoration(
+                color: _hasText && !widget.disabled ? AppColors.purple : AppColors.border,
+                shape: BoxShape.circle,
+              ),
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                icon: Icon(
+                  Icons.play_arrow,
+                  color: _hasText && !widget.disabled ? AppColors.white : AppColors.textMuted,
+                  size: 18,
+                ),
+                onPressed: _hasText && !widget.disabled ? _submit : null,
+              ),
             ),
-          ),
         ],
       ),
     );
