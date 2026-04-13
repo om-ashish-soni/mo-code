@@ -217,12 +217,20 @@ class DaemonService : Service() {
             start()
         }
 
-        // Log daemon stdout/stderr in a separate thread.
+        // Log daemon stdout/stderr to both logcat and a file for in-app viewing.
+        val logFile = File(filesDir, "daemon.log")
         Thread {
             try {
+                val writer = logFile.bufferedWriter()
                 proc.inputStream.bufferedReader().forEachLine { line ->
                     Log.d(TAG, line)
+                    try {
+                        writer.write(line)
+                        writer.newLine()
+                        writer.flush()
+                    } catch (_: Exception) {}
                 }
+                writer.close()
             } catch (_: Exception) {
                 // Process ended
             }

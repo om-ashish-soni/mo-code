@@ -397,6 +397,18 @@ class OpenCodeAPI {
     }
   }
 
+  // --- Daemon logs ---
+
+  /// Get the last 200 lines of daemon logs (Android only).
+  Future<String?> getDaemonLogs() async {
+    if (!Platform.isAndroid) return null;
+    try {
+      return await _daemonChannel.invokeMethod<String>('getLogs');
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
   // --- Runtime environment (proot + Alpine) ---
 
   /// Get runtime bootstrap status from the platform channel (Android only).

@@ -74,6 +74,17 @@ class DaemonBridge(
                     "size_bytes" to bootstrap.runtimeSize(),
                 ))
             }
+            "getLogs" -> {
+                val logFile = java.io.File(context.filesDir, "daemon.log")
+                if (logFile.exists()) {
+                    // Return last 200 lines
+                    val lines = logFile.readLines()
+                    val tail = lines.takeLast(200).joinToString("\n")
+                    result.success(tail)
+                } else {
+                    result.success("No log file found")
+                }
+            }
             "resetRuntime" -> {
                 Thread {
                     val bootstrap = RuntimeBootstrap(context)
