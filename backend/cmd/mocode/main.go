@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"mo-code/backend/agent"
@@ -15,7 +19,42 @@ import (
 	"mo-code/backend/storage"
 )
 
+// initDNS overrides Go's default resolver when MOCODE_DNS is set.
+// On Android the Go binary has no /etc/resolv.conf, so DNS falls back to
+// [::1]:53 which doesn't exist. This reads comma-separated DNS servers
+// (e.g. "8.8.8.8,8.8.4.4") from the env and dials them directly.
+func initDNS() {
+	dnsEnv := os.Getenv("MOCODE_DNS")
+	if dnsEnv == "" {
+		return
+	}
+	servers := strings.Split(dnsEnv, ",")
+	for i := range servers {
+		servers[i] = strings.TrimSpace(servers[i])
+		if !strings.Contains(servers[i], ":") {
+			servers[i] = servers[i] + ":53"
+		}
+	}
+	log.Printf("DNS: using custom resolvers %v", servers)
+	net.DefaultResolver = &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			d := net.Dialer{}
+			var lastErr error
+			for _, srv := range servers {
+				conn, err := d.DialContext(ctx, "udp", srv)
+				if err == nil {
+					return conn, nil
+				}
+				lastErr = err
+			}
+			return nil, fmt.Errorf("all DNS servers failed: %w", lastErr)
+		},
+	}
+}
+
 func main() {
+	initDNS()
 	// Default port file: next to the binary, or project root via env.
 	execPath, _ := os.Executable()
 	portFile := filepath.Join(filepath.Dir(execPath), "daemon_port")
@@ -94,6 +133,17 @@ func main() {
 			log.Printf("warning: proot runtime disabled: %v", err)
 		} else {
 			log.Printf("proot runtime: bin=%s rootfs=%s projects=%s", prootBin, prootRootFS, prootProjects)
+			// Install essential packages in background (first launch only).
+			go func() {
+				essentials := []string{"git", "nodejs", "npm", "python3", "curl", "openssh"}
+				log.Printf("proot: installing essential packages: %v", essentials)
+				installed, installErr := proot.InstallPackages(context.Background(), essentials)
+				if installErr != nil {
+					log.Printf("warning: failed to install packages: %v", installErr)
+				} else if len(installed) > 0 {
+					log.Printf("proot: installed %v", installed)
+				}
+			}()
 		}
 	}
 

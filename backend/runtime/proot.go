@@ -40,6 +40,8 @@ func NewProotRuntime(prootBin, rootFS, projectsDir string) (*ProotRuntime, error
 	if _, err := os.Stat(prootBin); err != nil {
 		return nil, fmt.Errorf("proot binary not found: %s", prootBin)
 	}
+	// Ensure execute permission (may be lost across app updates on Android).
+	_ = os.Chmod(prootBin, 0o755)
 	if _, err := os.Stat(rootFS); err != nil {
 		return nil, fmt.Errorf("alpine rootfs not found: %s", rootFS)
 	}
@@ -49,6 +51,22 @@ func NewProotRuntime(prootBin, rootFS, projectsDir string) (*ProotRuntime, error
 			return nil, fmt.Errorf("cannot create projects dir: %s: %v", projectsDir, mkErr)
 		}
 	}
+
+	// Write resolv.conf inside rootfs so DNS works inside proot.
+	// Use MOCODE_DNS env (set by Android DaemonService) or fallback to Google DNS.
+	resolvPath := filepath.Join(rootFS, "etc", "resolv.conf")
+	dnsServers := os.Getenv("MOCODE_DNS")
+	if dnsServers == "" {
+		dnsServers = "8.8.8.8,8.8.4.4"
+	}
+	var resolvContent strings.Builder
+	for _, srv := range strings.Split(dnsServers, ",") {
+		srv = strings.TrimSpace(srv)
+		if srv != "" {
+			resolvContent.WriteString("nameserver " + srv + "\n")
+		}
+	}
+	_ = os.WriteFile(resolvPath, []byte(resolvContent.String()), 0o644)
 
 	return &ProotRuntime{
 		ProotBin:    prootBin,
@@ -70,16 +88,20 @@ func (r *ProotRuntime) prootArgs(workDir string) []string {
 		}
 	}
 
-	return []string{
+	args := []string{
 		"-0",                                         // fake root
 		"-r", r.RootFS,                               // rootfs
 		"-b", "/dev",                                  // bind /dev
 		"-b", "/proc",                                 // bind /proc
 		"-b", "/sys",                                  // bind /sys
 		"-b", r.ProjectsDir + ":/home/developer",      // bind projects
-		"-b", "/etc/resolv.conf:/etc/resolv.conf",     // DNS resolution
 		"-w", prootWorkDir,                            // working directory
 	}
+	// Bind host resolv.conf if it exists; otherwise rely on rootfs copy.
+	if _, err := os.Stat("/etc/resolv.conf"); err == nil {
+		args = append(args, "-b", "/etc/resolv.conf:/etc/resolv.conf")
+	}
+	return args
 }
 
 // Exec runs a shell command inside the proot environment.
@@ -118,9 +140,10 @@ func (r *ProotRuntime) Exec(ctx context.Context, command, workDir string) (stdou
 	return stdout, stderr, exitCode, err
 }
 
-// prootEnv returns the environment variables set inside the proot container.
+// prootEnv returns the environment variables for the proot process.
+// Includes both host-side vars (PROOT_TMP_DIR) and guest-side vars.
 func (r *ProotRuntime) prootEnv() []string {
-	return []string{
+	env := []string{
 		"HOME=/home/developer",
 		"USER=developer",
 		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -128,6 +151,15 @@ func (r *ProotRuntime) prootEnv() []string {
 		"TERM=xterm-256color",
 		"SHELL=/bin/sh",
 	}
+	// PROOT_TMP_DIR: proot needs a writable tmp dir on the host.
+	// On Android, /tmp doesn't exist; use the cache dir or rootfs/tmp.
+	tmpDir := os.Getenv("TMPDIR")
+	if tmpDir == "" {
+		tmpDir = filepath.Join(r.RootFS, "tmp")
+	}
+	_ = os.MkdirAll(tmpDir, 0o755)
+	env = append(env, "PROOT_TMP_DIR="+tmpDir)
+	return env
 }
 
 // InstallPackages runs `apk add` for the given packages inside the proot environment.

@@ -91,9 +91,10 @@ func (e *Engine) Start(ctx context.Context, req TaskRequest) (<-chan Event, erro
 	}
 
 	// Check if this is a session resume (existing session with messages).
+	sessID := req.EffectiveSessionID()
 	var resumed bool
 	if e.sessions != nil {
-		if existing := e.sessions.Get(req.ID); existing != nil && len(existing.Messages) > 0 {
+		if existing := e.sessions.Get(sessID); existing != nil && len(existing.Messages) > 0 {
 			// Restore conversation history from the persisted session.
 			for _, msg := range existing.Messages {
 				ctxMgr.AddMessage(msg)
@@ -101,8 +102,8 @@ func (e *Engine) Start(ctx context.Context, req TaskRequest) (<-chan Event, erro
 			// Add the new user prompt on top.
 			userMsg := provider.Message{Role: provider.RoleUser, Content: req.Prompt}
 			ctxMgr.AddMessage(userMsg)
-			_ = e.sessions.AppendMessage(req.ID, userMsg)
-			_ = e.sessions.UpdateState(req.ID, "active")
+			_ = e.sessions.AppendMessage(sessID, userMsg)
+			_ = e.sessions.UpdateState(sessID, "active")
 			resumed = true
 		}
 	}
@@ -115,8 +116,8 @@ func (e *Engine) Start(ctx context.Context, req TaskRequest) (<-chan Event, erro
 		// Persist the new session.
 		if e.sessions != nil {
 			modelID := agentctx.DefaultModelForProvider(providerName)
-			if _, err := e.sessions.Create(req.ID, req.Prompt, e.workingDir, providerName, modelID); err == nil {
-				_ = e.sessions.AppendMessage(req.ID, userMsg)
+			if _, err := e.sessions.Create(sessID, req.Prompt, e.workingDir, providerName, modelID); err == nil {
+				_ = e.sessions.AppendMessage(sessID, userMsg)
 			}
 		}
 	}
@@ -147,7 +148,7 @@ func (e *Engine) Start(ctx context.Context, req TaskRequest) (<-chan Event, erro
 
 	retryP := provider.WrapWithRetry(p)
 	compactor := agentctx.NewCompactor(retryP)
-	go e.runLoop(taskCtx, req.ID, retryP, dispatcher, ctxMgr, compactor, ch)
+	go e.runLoop(taskCtx, req.ID, sessID, retryP, dispatcher, ctxMgr, compactor, ch)
 
 	return ch, nil
 }
@@ -181,6 +182,7 @@ func (e *Engine) Status(taskID string) (TaskInfo, error) {
 func (e *Engine) runLoop(
 	ctx context.Context,
 	taskID string,
+	sessID string,
 	p provider.Provider,
 	dispatcher *tools.Dispatcher,
 	ctxMgr *agentctx.Manager,
@@ -209,7 +211,7 @@ func (e *Engine) runLoop(
 				}
 				// Track compaction count in the session.
 				if e.sessions != nil {
-					_ = e.sessions.IncrementCompaction(taskID)
+					_ = e.sessions.IncrementCompaction(sessID)
 				}
 			}
 		}
@@ -219,7 +221,7 @@ func (e *Engine) runLoop(
 			ch <- Event{TaskID: taskID, Kind: EventError, Content: "task canceled"}
 			e.setTaskState(taskID, StateCanceled)
 			if e.sessions != nil {
-				_ = e.sessions.UpdateState(taskID, "canceled")
+				_ = e.sessions.UpdateState(sessID, "canceled")
 			}
 			return
 		default:
@@ -232,7 +234,7 @@ func (e *Engine) runLoop(
 			ch <- Event{TaskID: taskID, Kind: EventError, Content: fmt.Sprintf("provider error: %s", err)}
 			e.setTaskState(taskID, StateFailed)
 			if e.sessions != nil {
-				_ = e.sessions.UpdateState(taskID, "failed")
+				_ = e.sessions.UpdateState(sessID, "failed")
 			}
 			return
 		}
@@ -248,7 +250,7 @@ func (e *Engine) runLoop(
 				ch <- Event{TaskID: taskID, Kind: EventError, Content: "task canceled"}
 				e.setTaskState(taskID, StateCanceled)
 				if e.sessions != nil {
-					_ = e.sessions.UpdateState(taskID, "canceled")
+					_ = e.sessions.UpdateState(sessID, "canceled")
 				}
 				return
 			default:
@@ -286,7 +288,7 @@ func (e *Engine) runLoop(
 			ch <- Event{TaskID: taskID, Kind: EventError, Content: "task canceled"}
 			e.setTaskState(taskID, StateCanceled)
 			if e.sessions != nil {
-				_ = e.sessions.UpdateState(taskID, "canceled")
+				_ = e.sessions.UpdateState(sessID, "canceled")
 			}
 			return
 		}
@@ -312,7 +314,7 @@ func (e *Engine) runLoop(
 		}
 		ctxMgr.AddMessage(assistantMsg)
 		if e.sessions != nil {
-			_ = e.sessions.AppendMessage(taskID, assistantMsg)
+			_ = e.sessions.AppendMessage(sessID, assistantMsg)
 		}
 
 		// If no tool calls, we're done — the LLM gave a final text response.
@@ -324,7 +326,7 @@ func (e *Engine) runLoop(
 			}
 			e.setTaskState(taskID, StateCompleted)
 			if e.sessions != nil {
-				_ = e.sessions.UpdateState(taskID, "completed")
+				_ = e.sessions.UpdateState(sessID, "completed")
 			}
 			return
 		}
@@ -336,7 +338,7 @@ func (e *Engine) runLoop(
 				ch <- Event{TaskID: taskID, Kind: EventError, Content: "task canceled"}
 				e.setTaskState(taskID, StateCanceled)
 				if e.sessions != nil {
-					_ = e.sessions.UpdateState(taskID, "canceled")
+					_ = e.sessions.UpdateState(sessID, "canceled")
 				}
 				return
 			default:
@@ -388,7 +390,7 @@ func (e *Engine) runLoop(
 			}
 			ctxMgr.AddMessage(toolMsg)
 			if e.sessions != nil {
-				_ = e.sessions.AppendMessage(taskID, toolMsg)
+				_ = e.sessions.AppendMessage(sessID, toolMsg)
 			}
 		}
 	}
@@ -406,7 +408,7 @@ func (e *Engine) runLoop(
 	}
 	e.setTaskState(taskID, StateCompleted)
 	if e.sessions != nil {
-		_ = e.sessions.UpdateState(taskID, "completed")
+		_ = e.sessions.UpdateState(sessID, "completed")
 	}
 }
 

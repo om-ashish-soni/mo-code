@@ -720,12 +720,14 @@ func (c *wsClient) handleSessionResume(raw RawMessage) {
 		},
 	})
 
-	// Resume by starting a task with the session ID so the engine
-	// can restore context from the persisted session.
+	// Resume by starting a task. Use a unique task ID (session ID + timestamp)
+	// so the task manager doesn't conflict with the previous completed task.
+	// SessionID points to the persisted session for context restoration.
 	req := agent.TaskRequest{
-		ID:       payload.ID,
-		Prompt:   payload.Prompt,
-		Provider: sess.Provider,
+		ID:        fmt.Sprintf("%s-%d", payload.ID, time.Now().UnixMilli()),
+		SessionID: payload.ID,
+		Prompt:    payload.Prompt,
+		Provider:  sess.Provider,
 	}
 	if req.Provider == "" {
 		req.Provider = c.server.Config.ActiveProvider()

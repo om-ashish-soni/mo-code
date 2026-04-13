@@ -7,11 +7,20 @@ import "context"
 // TaskRequest is what the API layer sends to start an agent session.
 type TaskRequest struct {
 	ID           string            `json:"id"`
+	SessionID    string            `json:"session_id,omitempty"` // For session resume; falls back to ID if empty
 	Prompt       string            `json:"prompt"`
 	Provider     string            `json:"provider"`
 	WorkingDir   string            `json:"working_dir"`
 	ContextFiles []string          `json:"context_files,omitempty"`
 	Config       map[string]string `json:"config,omitempty"`
+}
+
+// EffectiveSessionID returns SessionID if set, otherwise ID.
+func (r TaskRequest) EffectiveSessionID() string {
+	if r.SessionID != "" {
+		return r.SessionID
+	}
+	return r.ID
 }
 
 // EventKind identifies the type of streaming event.
