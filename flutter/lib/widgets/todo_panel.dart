@@ -40,13 +40,13 @@ class _TodoPanelState extends State<TodoPanel> {
     final allDone = completed == total && total > 0;
 
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 4),
+      margin: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
       decoration: BoxDecoration(
         color: AppColors.panel,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
         border: Border.all(
           color: allDone
-              ? AppColors.green.withValues(alpha: 0.3)
+              ? AppColors.green.withAlpha(80)
               : AppColors.border,
           width: 0.5,
         ),
@@ -65,38 +65,32 @@ class _TodoPanelState extends State<TodoPanel> {
     return GestureDetector(
       onTap: widget.collapsible ? () => setState(() => _expanded = !_expanded) : null,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.sm),
         decoration: BoxDecoration(
           color: AppColors.surface,
           borderRadius: _expanded
-              ? const BorderRadius.vertical(top: Radius.circular(6))
-              : BorderRadius.circular(6),
+              ? const BorderRadius.vertical(top: Radius.circular(AppSpacing.radiusMd))
+              : BorderRadius.circular(AppSpacing.radiusMd),
         ),
         child: Row(
           children: [
             Icon(
-              allDone ? Icons.check_circle : Icons.checklist,
+              allDone ? Icons.check_circle_rounded : Icons.checklist_rounded,
               size: 14,
               color: allDone ? AppColors.green : AppColors.purple,
             ),
-            const SizedBox(width: 8),
-            const Expanded(
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
               child: Text(
                 'Tasks',
-                style: TextStyle(
-                  color: AppColors.textPrimary,
-                  fontSize: 12,
-                  fontFamily: 'JetBrainsMono',
-                  fontWeight: FontWeight.w500,
-                ),
+                style: AppTheme.uiFont(fontSize: 12, color: AppColors.textPrimary, fontWeight: FontWeight.w600),
               ),
             ),
-            // Progress indicator
             _buildProgressBadge(completed, total, allDone),
             if (widget.collapsible) ...[
-              const SizedBox(width: 6),
+              const SizedBox(width: AppSpacing.sm),
               Icon(
-                _expanded ? Icons.expand_less : Icons.expand_more,
+                _expanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
                 size: 14,
                 color: AppColors.textMuted,
               ),
@@ -109,19 +103,16 @@ class _TodoPanelState extends State<TodoPanel> {
 
   Widget _buildProgressBadge(int completed, int total, bool allDone) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 2),
       decoration: BoxDecoration(
-        color: allDone
-            ? AppColors.green.withValues(alpha: 0.15)
-            : AppColors.purple.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(4),
+        color: allDone ? AppColors.greenDim : AppColors.purpleDim,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
       ),
       child: Text(
         '$completed/$total',
-        style: TextStyle(
-          color: allDone ? AppColors.green : AppColors.purple,
+        style: AppTheme.codeFont(
           fontSize: 10,
-          fontFamily: 'JetBrainsMono',
+          color: allDone ? AppColors.green : AppColors.purpleLight,
           fontWeight: FontWeight.bold,
         ),
       ),
@@ -130,7 +121,7 @@ class _TodoPanelState extends State<TodoPanel> {
 
   Widget _buildItemList() {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
+      padding: const EdgeInsets.only(bottom: AppSpacing.xs),
       child: Column(
         children: widget.items
             .map((item) => _TodoItemRow(key: ValueKey(item.id), item: item))
@@ -150,9 +141,9 @@ class _TodoItemRow extends StatelessWidget {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 250),
       curve: Curves.easeInOut,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.xs + 1),
       color: item.status == TodoStatus.inProgress
-          ? AppColors.amber.withValues(alpha: 0.05)
+          ? AppColors.amberDim.withAlpha(30)
           : Colors.transparent,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -161,14 +152,14 @@ class _TodoItemRow extends StatelessWidget {
             padding: const EdgeInsets.only(top: 1),
             child: _buildStatusIcon(),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
               item.content,
-              style: TextStyle(
-                color: _textColor(),
+              style: AppTheme.codeFont(
                 fontSize: 12,
-                fontFamily: 'JetBrainsMono',
+                color: _textColor(),
+              ).copyWith(
                 decoration: item.status == TodoStatus.completed
                     ? TextDecoration.lineThrough
                     : null,
@@ -201,7 +192,7 @@ class _TodoItemRow extends StatelessWidget {
           decoration: BoxDecoration(
             border: Border.all(color: AppColors.amber, width: 1.2),
             borderRadius: BorderRadius.circular(3),
-            color: AppColors.amber.withValues(alpha: 0.15),
+            color: AppColors.amberDim,
           ),
           child: const Center(
             child: Icon(Icons.more_horiz, size: 10, color: AppColors.amber),
@@ -212,7 +203,7 @@ class _TodoItemRow extends StatelessWidget {
           width: 14,
           height: 14,
           decoration: BoxDecoration(
-            color: AppColors.green.withValues(alpha: 0.2),
+            color: AppColors.greenDim,
             borderRadius: BorderRadius.circular(3),
             border: Border.all(color: AppColors.green, width: 1.2),
           ),

@@ -69,18 +69,19 @@ class _TasksScreenState extends State<TasksScreen> {
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.panel,
-        title: const Text(
+        elevation: 0,
+        title: Text(
           'Tasks',
-          style: TextStyle(color: AppColors.white, fontSize: 18),
+          style: AppTheme.uiFont(fontSize: 18, color: AppColors.white, fontWeight: FontWeight.w600),
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh, color: AppColors.textMuted),
+            icon: const Icon(Icons.refresh_rounded, color: AppColors.textMuted),
             onPressed: _loadSessions,
             tooltip: 'Refresh',
           ),
           IconButton(
-            icon: const Icon(Icons.folder_open, color: AppColors.textMuted),
+            icon: const Icon(Icons.folder_open_rounded, color: AppColors.textMuted),
             onPressed: _showDirectoryPicker,
             tooltip: 'Change directory',
           ),
@@ -99,16 +100,16 @@ class _TasksScreenState extends State<TasksScreen> {
 
   Widget _buildDirectoryBanner() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
       color: AppColors.panel,
       child: Row(
         children: [
-          const Icon(Icons.folder, color: AppColors.amber, size: 16),
-          const SizedBox(width: 6),
+          const Icon(Icons.folder_rounded, color: AppColors.amber, size: 16),
+          const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
               _workingDir!,
-              style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+              style: AppTheme.codeFont(fontSize: 12, color: AppColors.textMuted),
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -117,7 +118,7 @@ class _TasksScreenState extends State<TasksScreen> {
               setState(() => _workingDir = null);
               _loadSessions();
             },
-            child: const Icon(Icons.close, color: AppColors.textMuted, size: 14),
+            child: const Icon(Icons.close_rounded, color: AppColors.textMuted, size: 14),
           ),
         ],
       ),
@@ -164,31 +165,29 @@ class _TasksScreenState extends State<TasksScreen> {
             height: 64,
             decoration: BoxDecoration(
               color: AppColors.surface,
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
             ),
-            child: const Icon(Icons.list_alt, color: AppColors.textMuted, size: 32),
+            child: const Icon(Icons.list_alt_rounded, color: AppColors.textMuted, size: 32),
           ),
-          const SizedBox(height: 16),
-          const Text(
+          const SizedBox(height: AppSpacing.lg),
+          Text(
             'No tasks yet',
-            style: TextStyle(color: AppColors.textPrimary, fontSize: 15),
+            style: AppTheme.uiFont(fontSize: 15, color: AppColors.textPrimary, fontWeight: FontWeight.w500),
           ),
-          const SizedBox(height: 6),
-          const Text(
+          const SizedBox(height: AppSpacing.sm),
+          Text(
             'Tasks will appear here when you send prompts\nto the agent.',
-            style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+            style: AppTheme.uiFont(fontSize: 12, color: AppColors.textMuted),
             textAlign: TextAlign.center,
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: AppSpacing.xl),
           ElevatedButton.icon(
             onPressed: _loadSessions,
-            icon: const Icon(Icons.refresh, size: 16),
+            icon: const Icon(Icons.refresh_rounded, size: 16),
             label: const Text('Refresh'),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.surface,
               foregroundColor: AppColors.textPrimary,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
           ),
         ],
@@ -199,7 +198,7 @@ class _TasksScreenState extends State<TasksScreen> {
   Widget _buildSessionList() {
     return ListView.builder(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.only(top: 4, bottom: 16),
+      padding: const EdgeInsets.only(top: AppSpacing.xs, bottom: AppSpacing.lg),
       itemCount: _sessions.length,
       itemBuilder: (context, index) {
         final session = _sessions[index];
@@ -239,18 +238,19 @@ class _TaskCard extends StatelessWidget {
     final provider = session['provider'] as String?;
 
     return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      margin: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.xs),
       color: AppColors.panel,
+      elevation: 0,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
         side: const BorderSide(color: AppColors.border, width: 0.5),
       ),
       child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        contentPadding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
         leading: _StateIcon(state: state),
         title: Text(
           title,
-          style: const TextStyle(color: AppColors.textPrimary, fontSize: 14),
+          style: AppTheme.uiFont(fontSize: 14, color: AppColors.textPrimary, fontWeight: FontWeight.w500),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
@@ -258,19 +258,19 @@ class _TaskCard extends StatelessWidget {
           children: [
             if (provider != null) ...[
               _ProviderBadge(provider: provider),
-              const SizedBox(width: 6),
+              const SizedBox(width: AppSpacing.sm),
             ],
             if (state.isNotEmpty) ...[
               _StateBadge(state: state),
-              const SizedBox(width: 6),
+              const SizedBox(width: AppSpacing.sm),
             ],
             Text(
               formatTime(updated),
-              style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+              style: AppTheme.uiFont(fontSize: 11, color: AppColors.textMuted),
             ),
           ],
         ),
-        trailing: const Icon(Icons.chevron_right, color: AppColors.textMuted, size: 18),
+        trailing: const Icon(Icons.chevron_right_rounded, color: AppColors.textMuted, size: 18),
         onTap: () {
           // TODO: navigate to session detail view
         },
@@ -286,19 +286,19 @@ class _StateIcon extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (IconData icon, Color color) = switch (state) {
-      'active' || 'running' => (Icons.play_circle, AppColors.green),
-      'completed' || 'done' => (Icons.check_circle, AppColors.blue),
-      'failed' || 'error' => (Icons.error, AppColors.red),
-      'canceled' || 'cancelled' => (Icons.cancel, AppColors.amber),
-      _ => (Icons.chat_bubble, AppColors.purple),
+      'active' || 'running' => (Icons.play_circle_rounded, AppColors.green),
+      'completed' || 'done' => (Icons.check_circle_rounded, AppColors.blue),
+      'failed' || 'error' => (Icons.error_rounded, AppColors.red),
+      'canceled' || 'cancelled' => (Icons.cancel_rounded, AppColors.amber),
+      _ => (Icons.chat_bubble_rounded, AppColors.purple),
     };
 
     return Container(
       width: 40,
       height: 40,
       decoration: BoxDecoration(
-        color: color.withAlpha(20),
-        borderRadius: BorderRadius.circular(8),
+        color: color.withAlpha(15),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
       ),
       child: Icon(icon, color: color, size: 20),
     );
@@ -320,14 +320,14 @@ class _StateBadge extends StatelessWidget {
     };
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 2),
       decoration: BoxDecoration(
-        color: color.withAlpha(20),
-        borderRadius: BorderRadius.circular(3),
+        color: color.withAlpha(15),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
       ),
       child: Text(
         state,
-        style: TextStyle(color: color, fontSize: 10),
+        style: AppTheme.uiFont(fontSize: 10, color: color, fontWeight: FontWeight.w500),
       ),
     );
   }
@@ -340,14 +340,14 @@ class _ProviderBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 2),
       decoration: BoxDecoration(
-        color: AppColors.purple.withAlpha(20),
-        borderRadius: BorderRadius.circular(3),
+        color: AppColors.purpleDim.withAlpha(60),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
       ),
       child: Text(
         provider,
-        style: const TextStyle(color: AppColors.purple, fontSize: 10),
+        style: AppTheme.uiFont(fontSize: 10, color: AppColors.purpleLight, fontWeight: FontWeight.w500),
       ),
     );
   }
@@ -375,20 +375,26 @@ class _DirectoryPickerDialogState extends State<DirectoryPickerDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       backgroundColor: AppColors.panel,
-      title: const Text('Working Directory', style: TextStyle(color: AppColors.white)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppSpacing.radiusLg)),
+      title: Text('Working Directory', style: AppTheme.uiFont(fontSize: 18, color: AppColors.white, fontWeight: FontWeight.w600)),
       content: TextField(
         controller: _controller,
-        style: const TextStyle(color: AppColors.textPrimary),
-        decoration: const InputDecoration(
+        style: AppTheme.codeFont(fontSize: 14, color: AppColors.textPrimary),
+        decoration: InputDecoration(
           hintText: '/path/to/project',
+          hintStyle: AppTheme.codeFont(fontSize: 14, color: AppColors.textDisabled),
           filled: true,
-          fillColor: AppColors.background,
+          fillColor: AppColors.surface,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+            borderSide: BorderSide.none,
+          ),
         ),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel', style: TextStyle(color: AppColors.textMuted)),
+          child: Text('Cancel', style: AppTheme.uiFont(fontSize: 14, color: AppColors.textMuted)),
         ),
         ElevatedButton(
           onPressed: () {

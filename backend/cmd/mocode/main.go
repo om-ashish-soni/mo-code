@@ -11,6 +11,7 @@ import (
 	"mo-code/backend/api"
 	agentctx "mo-code/backend/context"
 	"mo-code/backend/provider"
+	"mo-code/backend/runtime"
 	"mo-code/backend/storage"
 )
 
@@ -78,12 +79,33 @@ func main() {
 		}
 	}
 
-	engine := agent.NewEngine(registry, workingDir, sessions)
+	// Initialize proot runtime if configured (Android: set by DaemonService).
+	var proot *runtime.ProotRuntime
+	prootBin := os.Getenv("MOCODE_PROOT_BIN")
+	prootRootFS := os.Getenv("MOCODE_PROOT_ROOTFS")
+	prootProjects := os.Getenv("MOCODE_PROOT_PROJECTS")
+	if prootBin != "" && prootRootFS != "" {
+		if prootProjects == "" {
+			prootProjects = filepath.Join(workingDir, "projects")
+		}
+		var err error
+		proot, err = runtime.NewProotRuntime(prootBin, prootRootFS, prootProjects)
+		if err != nil {
+			log.Printf("warning: proot runtime disabled: %v", err)
+		} else {
+			log.Printf("proot runtime: bin=%s rootfs=%s projects=%s", prootBin, prootRootFS, prootProjects)
+		}
+	}
+
+	engine := agent.NewEngine(registry, workingDir, sessions, proot)
 	planEngine := agent.NewPlanEngine(registry, workingDir)
 
 	server, err := api.Start(portFile, engine, registry, sessions, planEngine)
 	if err != nil {
 		log.Fatalf("start daemon: %v", err)
+	}
+	if proot != nil {
+		server.SetProot(proot)
 	}
 	log.Printf("mo-code daemon listening on 127.0.0.1:%d", server.Port())
 	log.Printf("port file: %s", portFile)

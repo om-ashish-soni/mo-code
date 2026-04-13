@@ -27,6 +27,17 @@ coverage/
 android/app/debug/
 android/app/profile/
 android/app/release/
+*.aab
+*.apk
+
+# Kotlin/Gradle caches
+.kotlin/
+.gradle/
+**/.cxx/
+
+# Runtime assets (downloaded by scripts/download-runtime.sh, ~5MB)
+**/assets/runtime/alpine-minirootfs.tar.gz
+**/assets/runtime/proot-arm64
 
 # Logs
 *.log
@@ -42,7 +53,7 @@ daemon.log
 *.swp
 
 # Generated/runtime
-daemon_port
+**/daemon_port
 
 # Scratch/test clones
 backend/headless-twitter/

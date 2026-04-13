@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
 import '../api/daemon.dart';
 import '../theme/colors.dart';
@@ -21,6 +23,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
   String _activeProvider = 'claude';
   Map<String, bool> _providerConfigured = {};
   Map<String, dynamic>? _serverStatus;
+  Map<String, dynamic>? _runtimeStatus;
 
   // Loading / error states
   bool _loading = true;
@@ -68,8 +71,14 @@ class _ConfigScreenState extends State<ConfigScreen> {
     });
 
     final api = context.read<OpenCodeAPI>();
-    final config = await api.fetchConfig();
-    final status = await api.fetchStatus();
+    final results = await Future.wait([
+      api.fetchConfig(),
+      api.fetchStatus(),
+      api.fetchRuntimeStatus(),
+    ]);
+    final config = results[0];
+    final status = results[1];
+    final runtime = results[2];
 
     if (!mounted) return;
 
@@ -83,6 +92,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
           'copilot': (providers['copilot'] as Map<String, dynamic>?)?['configured'] == true,
         };
         _serverStatus = status;
+        _runtimeStatus = runtime;
         _loading = false;
       });
     } else {
@@ -131,10 +141,11 @@ class _ConfigScreenState extends State<ConfigScreen> {
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.panel,
-        title: const Text('Config', style: TextStyle(color: AppColors.white, fontSize: 18)),
+        elevation: 0,
+        title: Text('Config', style: AppTheme.uiFont(fontSize: 18, color: AppColors.white, fontWeight: FontWeight.w600)),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh, color: AppColors.textMuted),
+            icon: const Icon(Icons.refresh_rounded, color: AppColors.textMuted),
             onPressed: _loadConfig,
             tooltip: 'Refresh',
           ),
@@ -159,40 +170,41 @@ class _ConfigScreenState extends State<ConfigScreen> {
     }
 
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppSpacing.lg),
       children: [
         if (_toast != null) _buildToastBanner(),
         _buildServerInfo(),
-        const SizedBox(height: 20),
+        const SizedBox(height: AppSpacing.xl),
         _buildProviderSelector(),
-        const SizedBox(height: 20),
+        const SizedBox(height: AppSpacing.xl),
         _buildApiKeySection('claude', 'Claude (Anthropic)', _claudeKeyController, 'sk-ant-...'),
-        const SizedBox(height: 12),
+        const SizedBox(height: AppSpacing.md),
         _buildApiKeySection('gemini', 'Gemini (Google)', _geminiKeyController, 'AIza...'),
-        const SizedBox(height: 12),
+        const SizedBox(height: AppSpacing.md),
         _buildCopilotAuthSection(),
-        const SizedBox(height: 20),
+        const SizedBox(height: AppSpacing.xl),
         _buildWorkingDirSection(),
+        const SizedBox(height: AppSpacing.xl),
+        _buildRuntimeSection(),
+        const SizedBox(height: AppSpacing.xxxl),
       ],
     );
   }
 
   Widget _buildLoadingSkeleton() {
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppSpacing.lg),
       child: ShimmerLoading(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Server info skeleton
             Container(
               height: 60,
               decoration: BoxDecoration(
                 color: AppColors.panel,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppColors.border),
+                borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
               ),
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(AppSpacing.md),
               child: const Row(
                 children: [
                   ShimmerLine(width: 80, height: 14),
@@ -201,54 +213,49 @@ class _ConfigScreenState extends State<ConfigScreen> {
                 ],
               ),
             ),
-            const SizedBox(height: 20),
-            // Provider selector skeleton
+            const SizedBox(height: AppSpacing.xl),
             Container(
-              height: 80,
               decoration: BoxDecoration(
                 color: AppColors.panel,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppColors.border),
+                borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
               ),
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(AppSpacing.md),
               child: const Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   ShimmerLine(width: 100, height: 10),
-                  SizedBox(height: 12),
+                  SizedBox(height: AppSpacing.md),
                   Row(
                     children: [
                       Expanded(child: ShimmerLine(height: 36)),
-                      SizedBox(width: 8),
+                      SizedBox(width: AppSpacing.sm),
                       Expanded(child: ShimmerLine(height: 36)),
-                      SizedBox(width: 8),
+                      SizedBox(width: AppSpacing.sm),
                       Expanded(child: ShimmerLine(height: 36)),
                     ],
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 20),
-            // API key sections skeleton
+            const SizedBox(height: AppSpacing.xl),
             for (var i = 0; i < 3; i++) ...[
               Container(
                 height: 90,
                 decoration: BoxDecoration(
                   color: AppColors.panel,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppColors.border),
+                  borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
                 ),
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(AppSpacing.md),
                 child: const Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     ShimmerLine(width: 120, height: 12),
-                    SizedBox(height: 12),
+                    SizedBox(height: AppSpacing.md),
                     ShimmerLine(height: 40),
                   ],
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: AppSpacing.md),
             ],
           ],
         ),
@@ -259,33 +266,33 @@ class _ConfigScreenState extends State<ConfigScreen> {
   Widget _buildToastBanner() {
     final isError = _toast!.isError;
     final color = isError ? AppColors.red : AppColors.green;
-    final icon = isError ? Icons.error_outline : Icons.check_circle;
+    final icon = isError ? Icons.error_outline : Icons.check_circle_rounded;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      margin: const EdgeInsets.only(bottom: AppSpacing.md),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.md),
       decoration: BoxDecoration(
-        color: color.withAlpha(30),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withAlpha(80)),
+        color: color.withAlpha(15),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(color: color.withAlpha(40)),
       ),
       child: Row(
         children: [
-          Icon(icon, color: color, size: 16),
-          const SizedBox(width: 8),
+          Icon(icon, color: color, size: 18),
+          const SizedBox(width: AppSpacing.md),
           Expanded(
             child: Text(
               _toast!.message,
-              style: TextStyle(color: color, fontSize: 13),
+              style: AppTheme.uiFont(fontSize: 13, color: color, fontWeight: FontWeight.w500),
             ),
           ),
           GestureDetector(
             onTap: () => setState(() => _toast = null),
-            child: Icon(Icons.close, color: color.withAlpha(120), size: 14),
+            child: Icon(Icons.close_rounded, color: color.withAlpha(120), size: 16),
           ),
         ],
       ),
-    );
+    ).animate().fadeIn(duration: 200.ms).slideY(begin: -0.1, end: 0, duration: 200.ms);
   }
 
   Widget _buildServerInfo() {
@@ -293,39 +300,41 @@ class _ConfigScreenState extends State<ConfigScreen> {
     final uptime = _serverStatus?['uptime_seconds'] as int? ?? 0;
     final version = _serverStatus?['version'] as String? ?? '?';
     final activeTasks = _serverStatus?['active_tasks'] as int? ?? 0;
+    final statusColor = connected ? AppColors.green : AppColors.red;
 
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
         color: AppColors.panel,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(color: AppColors.border, width: 0.5),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Server', style: TextStyle(color: AppColors.textMuted, fontSize: 11, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 8),
+          Text('Server', style: AppTheme.uiFont(fontSize: 11, color: AppColors.textMuted, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
+          const SizedBox(height: AppSpacing.md),
           Row(
             children: [
               Container(
                 width: 8, height: 8,
                 decoration: BoxDecoration(
-                  color: connected ? AppColors.green : AppColors.red,
+                  color: statusColor,
                   shape: BoxShape.circle,
+                  boxShadow: [BoxShadow(color: statusColor.withAlpha(60), blurRadius: 4, spreadRadius: 1)],
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: AppSpacing.sm),
               Text(
                 connected ? 'Connected' : 'Disconnected',
-                style: TextStyle(color: connected ? AppColors.green : AppColors.red, fontSize: 13),
+                style: AppTheme.uiFont(fontSize: 13, color: statusColor, fontWeight: FontWeight.w500),
               ),
               const Spacer(),
-              Text('v$version', style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
-              const SizedBox(width: 12),
-              Text('${uptime}s up', style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
-              const SizedBox(width: 12),
-              Text('$activeTasks tasks', style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
+              Text('v$version', style: AppTheme.codeFont(fontSize: 11, color: AppColors.textMuted)),
+              const SizedBox(width: AppSpacing.md),
+              Text('${uptime}s up', style: AppTheme.codeFont(fontSize: 11, color: AppColors.textMuted)),
+              const SizedBox(width: AppSpacing.md),
+              Text('$activeTasks tasks', style: AppTheme.codeFont(fontSize: 11, color: AppColors.textMuted)),
             ],
           ),
         ],
@@ -335,23 +344,23 @@ class _ConfigScreenState extends State<ConfigScreen> {
 
   Widget _buildProviderSelector() {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
         color: AppColors.panel,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(color: AppColors.border, width: 0.5),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Active Provider', style: TextStyle(color: AppColors.textMuted, fontSize: 11, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 8),
+          Text('Active Provider', style: AppTheme.uiFont(fontSize: 11, color: AppColors.textMuted, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
+          const SizedBox(height: AppSpacing.md),
           Row(
             children: [
               for (final p in ['claude', 'gemini', 'copilot'])
                 Expanded(
                   child: Padding(
-                    padding: EdgeInsets.only(right: p != 'copilot' ? 8 : 0),
+                    padding: EdgeInsets.only(right: p != 'copilot' ? AppSpacing.sm : 0),
                     child: _buildProviderChip(p),
                   ),
                 ),
@@ -367,31 +376,36 @@ class _ConfigScreenState extends State<ConfigScreen> {
     final configured = _providerConfigured[provider] ?? false;
 
     return GestureDetector(
-      onTap: () => _switchProvider(provider),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10),
+      onTap: () {
+        HapticFeedback.selectionClick();
+        _switchProvider(provider);
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
         decoration: BoxDecoration(
-          color: active ? AppColors.purple.withAlpha(40) : AppColors.background,
-          borderRadius: BorderRadius.circular(8),
+          color: active ? AppColors.purpleDim : AppColors.surface,
+          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
           border: Border.all(
-            color: active ? AppColors.purple : AppColors.border,
+            color: active ? AppColors.purple.withAlpha(80) : Colors.transparent,
+            width: 1.5,
           ),
         ),
         child: Column(
           children: [
             Text(
               provider,
-              style: TextStyle(
-                color: active ? AppColors.purple : AppColors.textPrimary,
+              style: AppTheme.uiFont(
                 fontSize: 13,
-                fontWeight: active ? FontWeight.w600 : FontWeight.normal,
+                color: active ? AppColors.purpleLight : AppColors.textPrimary,
+                fontWeight: active ? FontWeight.w600 : FontWeight.w400,
               ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: AppSpacing.xs),
             Icon(
-              configured ? Icons.check_circle : Icons.cancel,
-              size: 12,
-              color: configured ? AppColors.green : AppColors.textMuted,
+              configured ? Icons.check_circle_rounded : Icons.cancel_rounded,
+              size: 14,
+              color: configured ? AppColors.green : AppColors.textDisabled,
             ),
           ],
         ),
@@ -403,71 +417,65 @@ class _ConfigScreenState extends State<ConfigScreen> {
     final configured = _providerConfigured[provider] ?? false;
 
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
         color: AppColors.panel,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(color: AppColors.border, width: 0.5),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Text(label, style: const TextStyle(color: AppColors.textPrimary, fontSize: 13)),
+              Text(label, style: AppTheme.uiFont(fontSize: 14, color: AppColors.textPrimary, fontWeight: FontWeight.w500)),
               const Spacer(),
               if (configured)
-                const Row(
+                Row(
                   children: [
-                    Icon(Icons.check_circle, color: AppColors.green, size: 14),
-                    SizedBox(width: 4),
-                    Text('Configured', style: TextStyle(color: AppColors.green, fontSize: 11)),
+                    const Icon(Icons.check_circle_rounded, color: AppColors.green, size: 14),
+                    const SizedBox(width: AppSpacing.xs),
+                    Text('Configured', style: AppTheme.uiFont(fontSize: 11, color: AppColors.green, fontWeight: FontWeight.w500)),
                   ],
                 ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpacing.md),
           Row(
             children: [
               Expanded(
                 child: TextField(
                   controller: controller,
                   obscureText: true,
-                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
+                  style: AppTheme.codeFont(fontSize: 13, color: AppColors.textPrimary),
                   decoration: InputDecoration(
                     hintText: hint,
-                    hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+                    hintStyle: AppTheme.codeFont(fontSize: 13, color: AppColors.textDisabled),
                     filled: true,
-                    fillColor: AppColors.background,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    fillColor: AppColors.surface,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.md),
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(6),
-                      borderSide: const BorderSide(color: AppColors.border),
+                      borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                      borderSide: BorderSide.none,
                     ),
                     enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(6),
-                      borderSide: const BorderSide(color: AppColors.border),
+                      borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                      borderSide: BorderSide.none,
                     ),
                     focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(6),
-                      borderSide: const BorderSide(color: AppColors.purple),
+                      borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                      borderSide: const BorderSide(color: AppColors.purple, width: 1.5),
                     ),
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: AppSpacing.sm),
               ElevatedButton(
                 onPressed: () {
                   _setApiKey(provider, controller.text.trim());
                   controller.clear();
                 },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.purple,
-                  foregroundColor: AppColors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                ),
-                child: const Text('Save', style: TextStyle(fontSize: 13)),
+                child: Text('Save', style: AppTheme.uiFont(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.white)),
               ),
             ],
           ),
@@ -480,63 +488,63 @@ class _ConfigScreenState extends State<ConfigScreen> {
     final configured = _providerConfigured['copilot'] ?? false;
 
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
         color: AppColors.panel,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(color: AppColors.border, width: 0.5),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Text('Copilot (GitHub)', style: TextStyle(color: AppColors.textPrimary, fontSize: 13)),
+              Text('Copilot (GitHub)', style: AppTheme.uiFont(fontSize: 14, color: AppColors.textPrimary, fontWeight: FontWeight.w500)),
               const Spacer(),
               if (configured)
-                const Row(
+                Row(
                   children: [
-                    Icon(Icons.check_circle, color: AppColors.green, size: 14),
-                    SizedBox(width: 4),
-                    Text('Authenticated', style: TextStyle(color: AppColors.green, fontSize: 11)),
+                    const Icon(Icons.check_circle_rounded, color: AppColors.green, size: 14),
+                    const SizedBox(width: AppSpacing.xs),
+                    Text('Authenticated', style: AppTheme.uiFont(fontSize: 11, color: AppColors.green, fontWeight: FontWeight.w500)),
                   ],
                 ),
             ],
           ),
-          const SizedBox(height: 8),
-          const Text(
+          const SizedBox(height: AppSpacing.sm),
+          Text(
             'Sign in with your GitHub account — no API key needed.',
-            style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+            style: AppTheme.uiFont(fontSize: 12, color: AppColors.textMuted),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: AppSpacing.lg),
           if (_copilotAuthInProgress && _copilotUserCode != null) ...[
             Container(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(AppSpacing.lg),
               decoration: BoxDecoration(
-                color: AppColors.background,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppColors.purple.withAlpha(80)),
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                border: Border.all(color: AppColors.purple.withAlpha(40)),
               ),
               child: Column(
                 children: [
-                  const Text('Enter this code at github.com/login/device:', style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
-                  const SizedBox(height: 8),
+                  Text('Enter this code at github.com/login/device:', style: AppTheme.uiFont(fontSize: 12, color: AppColors.textMuted)),
+                  const SizedBox(height: AppSpacing.md),
                   SelectableText(
                     _copilotUserCode!,
-                    style: const TextStyle(color: AppColors.purple, fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: 4),
+                    style: AppTheme.codeFont(fontSize: 28, color: AppColors.purpleLight, fontWeight: FontWeight.w700),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: AppSpacing.md),
                   Text(
                     _copilotVerificationUri ?? 'https://github.com/login/device',
-                    style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+                    style: AppTheme.codeFont(fontSize: 11, color: AppColors.textMuted),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: AppSpacing.lg),
                   const SizedBox(
                     width: 16, height: 16,
                     child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.purple),
                   ),
-                  const SizedBox(height: 4),
-                  const Text('Waiting for authorization...', style: TextStyle(color: AppColors.textMuted, fontSize: 11)),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text('Waiting for authorization...', style: AppTheme.uiFont(fontSize: 11, color: AppColors.textMuted)),
                 ],
               ),
             ),
@@ -545,14 +553,11 @@ class _ConfigScreenState extends State<ConfigScreen> {
               width: double.infinity,
               child: ElevatedButton.icon(
                 onPressed: configured ? null : _startCopilotAuth,
-                icon: const Icon(Icons.login, size: 16),
+                icon: const Icon(Icons.login_rounded, size: 18),
                 label: Text(configured ? 'Connected' : 'Sign in with GitHub'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.purple,
-                  foregroundColor: AppColors.white,
-                  disabledBackgroundColor: AppColors.border,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                  disabledBackgroundColor: AppColors.surfaceHigh,
+                  disabledForegroundColor: AppColors.textDisabled,
                 ),
               ),
             ),
@@ -631,44 +636,45 @@ class _ConfigScreenState extends State<ConfigScreen> {
 
   Widget _buildWorkingDirSection() {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
         color: AppColors.panel,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(color: AppColors.border, width: 0.5),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Working Directory', style: TextStyle(color: AppColors.textMuted, fontSize: 11, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 8),
+          Text('Working Directory', style: AppTheme.uiFont(fontSize: 11, color: AppColors.textMuted, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
+          const SizedBox(height: AppSpacing.md),
           Row(
             children: [
               Expanded(
                 child: TextField(
                   controller: _workingDirController,
-                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
+                  style: AppTheme.codeFont(fontSize: 13, color: AppColors.textPrimary),
                   decoration: InputDecoration(
                     hintText: '/path/to/project',
+                    hintStyle: AppTheme.codeFont(fontSize: 13, color: AppColors.textDisabled),
                     filled: true,
-                    fillColor: AppColors.background,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    fillColor: AppColors.surface,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.md),
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(6),
-                      borderSide: const BorderSide(color: AppColors.border),
+                      borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                      borderSide: BorderSide.none,
                     ),
                     enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(6),
-                      borderSide: const BorderSide(color: AppColors.border),
+                      borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                      borderSide: BorderSide.none,
                     ),
                     focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(6),
-                      borderSide: const BorderSide(color: AppColors.purple),
+                      borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                      borderSide: const BorderSide(color: AppColors.purple, width: 1.5),
                     ),
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: AppSpacing.sm),
               ElevatedButton(
                 onPressed: () {
                   final dir = _workingDirController.text.trim();
@@ -687,19 +693,136 @@ class _ConfigScreenState extends State<ConfigScreen> {
                   });
                   _showToast('Working directory updated');
                 },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.purple,
-                  foregroundColor: AppColors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                ),
-                child: const Text('Set', style: TextStyle(fontSize: 13)),
+                child: Text('Set', style: AppTheme.uiFont(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.white)),
               ),
             ],
           ),
         ],
       ),
     );
+  }
+
+  Widget _buildRuntimeSection() {
+    final available = _runtimeStatus?['available'] == true;
+    final sizeBytes = _runtimeStatus?['size_bytes'] as int? ?? 0;
+
+    String formatSize(int bytes) {
+      if (bytes < 1024) return '$bytes B';
+      if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      decoration: BoxDecoration(
+        color: AppColors.panel,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(color: AppColors.border, width: 0.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text('Runtime Environment',
+                  style: AppTheme.uiFont(fontSize: 11, color: AppColors.textMuted, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
+              const Spacer(),
+              Icon(
+                available ? Icons.check_circle_rounded : Icons.cancel_rounded,
+                size: 14,
+                color: available ? AppColors.green : AppColors.textDisabled,
+              ),
+              const SizedBox(width: AppSpacing.xs),
+              Text(
+                available ? 'Active' : 'Not available',
+                style: AppTheme.uiFont(fontSize: 11, color: available ? AppColors.green : AppColors.textDisabled, fontWeight: FontWeight.w500),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          if (available) ...[
+            _runtimeInfoRow('Type', 'proot + Alpine Linux'),
+            _runtimeInfoRow('Size', formatSize(sizeBytes)),
+            if (_runtimeStatus?['rootfs'] != null)
+              _runtimeInfoRow('Rootfs', _runtimeStatus!['rootfs'] as String),
+            const SizedBox(height: AppSpacing.lg),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _resetRuntime,
+                icon: const Icon(Icons.refresh_rounded, size: 16),
+                label: const Text('Reset Environment'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.red,
+                  side: BorderSide(color: AppColors.red.withAlpha(60)),
+                ),
+              ),
+            ),
+          ] else ...[
+            Text(
+              'proot runtime is not configured. On Android, it bootstraps automatically on first launch.',
+              style: AppTheme.uiFont(fontSize: 12, color: AppColors.textMuted),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _runtimeInfoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 70,
+            child: Text(label, style: AppTheme.uiFont(fontSize: 12, color: AppColors.textMuted)),
+          ),
+          Expanded(
+            child: Text(value, style: AppTheme.codeFont(fontSize: 12, color: AppColors.textPrimary)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _resetRuntime() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.panel,
+        title: Text('Reset Runtime?', style: AppTheme.uiFont(fontSize: 16, color: AppColors.white, fontWeight: FontWeight.w600)),
+        content: Text(
+          'This will wipe and re-extract the Alpine Linux environment. Installed packages will be lost.',
+          style: AppTheme.uiFont(fontSize: 13, color: AppColors.textMuted),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: AppTheme.uiFont(fontSize: 13, color: AppColors.textMuted)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Reset', style: AppTheme.uiFont(fontSize: 13, color: AppColors.red, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    final api = context.read<OpenCodeAPI>();
+    _showToast('Resetting runtime...');
+    final success = await api.resetRuntime();
+    if (mounted) {
+      if (success) {
+        _showToast('Runtime reset complete');
+        _loadConfig();
+      } else {
+        _showToast('Runtime reset failed', isError: true);
+      }
+    }
   }
 }
 

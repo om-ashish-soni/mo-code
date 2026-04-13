@@ -9,6 +9,7 @@ import (
 
 	agentctx "mo-code/backend/context"
 	"mo-code/backend/provider"
+	"mo-code/backend/runtime"
 	"mo-code/backend/tools"
 )
 
@@ -25,6 +26,7 @@ type Engine struct {
 	workingDir string
 	sessions   *agentctx.SessionStore
 	subagents  *SubagentRunner
+	proot      *runtime.ProotRuntime
 
 	mu    sync.RWMutex
 	tasks map[string]*taskState
@@ -32,11 +34,17 @@ type Engine struct {
 
 // NewEngine creates an Engine with the given provider registry and working directory.
 // sessions may be nil to disable persistence.
-func NewEngine(registry provider.ProviderRegistry, workingDir string, sessions *agentctx.SessionStore) *Engine {
+// proot may be nil — when nil, shell commands execute directly on the host.
+func NewEngine(registry provider.ProviderRegistry, workingDir string, sessions *agentctx.SessionStore, proot ...*runtime.ProotRuntime) *Engine {
+	var pr *runtime.ProotRuntime
+	if len(proot) > 0 {
+		pr = proot[0]
+	}
 	e := &Engine{
 		registry:   registry,
 		workingDir: workingDir,
 		sessions:   sessions,
+		proot:      pr,
 		tasks:      make(map[string]*taskState),
 	}
 	e.subagents = NewSubagentRunner(registry, workingDir)
@@ -67,9 +75,12 @@ func (e *Engine) Start(ctx context.Context, req TaskRequest) (<-chan Event, erro
 		return nil, fmt.Errorf("provider %q is not configured (missing API key)", providerName)
 	}
 
-	// Set up tools and context, with subagent spawner for the task tool.
+	// Set up tools and context, with subagent spawner and optional proot runtime.
 	spawner := &subagentSpawnerAdapter{runner: e.subagents}
-	dispatcher := tools.DefaultDispatcher(e.workingDir, spawner)
+	dispatcher := tools.DefaultDispatcherWithOpts(e.workingDir, tools.DispatcherOpts{
+		Spawner: spawner,
+		Proot:   e.proot,
+	})
 	toolNames := dispatcher.Names()
 	systemPrompt := agentctx.BuildSystemPrompt(e.workingDir, toolNames, providerName)
 	ctxMgr := agentctx.NewManager(systemPrompt)

@@ -17,6 +17,7 @@ import (
 	"mo-code/backend/agent"
 	agentctx "mo-code/backend/context"
 	"mo-code/backend/provider"
+	"mo-code/backend/runtime"
 
 	"github.com/gorilla/websocket"
 )
@@ -40,6 +41,8 @@ type Server struct {
 	Sessions  *agentctx.SessionStore
 	// Registry holds the provider registry for wiring config changes to providers.
 	Registry *provider.Registry
+	// Proot is the optional proot runtime (nil if not configured).
+	Proot *runtime.ProotRuntime
 }
 
 var upgrader = websocket.Upgrader{
@@ -105,6 +108,11 @@ func Start(portFile string, runner agent.Runner, registry *provider.Registry, se
 	return s, nil
 }
 
+// SetProot attaches the proot runtime to the server for the /api/runtime/status endpoint.
+func (s *Server) SetProot(p *runtime.ProotRuntime) {
+	s.Proot = p
+}
+
 // Port returns the port the server is listening on.
 func (s *Server) Port() int {
 	if s.listener == nil {
@@ -139,6 +147,7 @@ func (s *Server) newMux() *http.ServeMux {
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/auth/copilot/device", s.handleCopilotDeviceAuth)
 	mux.HandleFunc("/api/auth/copilot/poll", s.handleCopilotPoll)
+	mux.HandleFunc("/api/runtime/status", s.handleRuntimeStatus)
 	mux.HandleFunc("/ws", s.handleWebSocket)
 
 	// File browser endpoints (used by Flutter Files tab).
@@ -164,6 +173,31 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		QueuedTasks:   s.Tasks.QueuedCount(),
 		Version:       Version,
 	})
+}
+
+func (s *Server) handleRuntimeStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	type runtimeStatus struct {
+		Available bool   `json:"available"`
+		ProotBin  string `json:"proot_bin,omitempty"`
+		RootFS    string `json:"rootfs,omitempty"`
+		Projects  string `json:"projects_dir,omitempty"`
+		SizeBytes int64  `json:"size_bytes,omitempty"`
+	}
+	resp := runtimeStatus{Available: s.Proot != nil}
+	if s.Proot != nil {
+		resp.ProotBin = s.Proot.ProotBin
+		resp.RootFS = s.Proot.RootFS
+		resp.Projects = s.Proot.ProjectsDir
+		if size, err := s.Proot.RootFSSize(); err == nil {
+			resp.SizeBytes = size
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {

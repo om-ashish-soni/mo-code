@@ -397,6 +397,46 @@ class OpenCodeAPI {
     }
   }
 
+  // --- Runtime environment (proot + Alpine) ---
+
+  /// Get runtime bootstrap status from the platform channel (Android only).
+  Future<Map<String, dynamic>?> getRuntimeStatus() async {
+    if (!Platform.isAndroid) return null;
+    try {
+      final result = await _daemonChannel.invokeMethod<Map>('getRuntimeStatus');
+      return result?.cast<String, dynamic>();
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
+  /// Reset the runtime — wipes and re-extracts proot + Alpine rootfs.
+  Future<bool> resetRuntime() async {
+    if (!Platform.isAndroid) return false;
+    try {
+      return await _daemonChannel.invokeMethod<bool>('resetRuntime') == true;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
+  /// Fetch runtime status from the Go daemon HTTP endpoint.
+  Future<Map<String, dynamic>?> fetchRuntimeStatus() async {
+    try {
+      final resp = await http.get(
+        Uri.parse('$_baseUrl/api/runtime/status'),
+        headers: _authHeaders,
+      );
+      if (resp.statusCode == 200) {
+        return jsonDecode(resp.body) as Map<String, dynamic>;
+      }
+      return null;
+    } catch (e) {
+      debugPrint('Fetch runtime status failed: $e');
+      return null;
+    }
+  }
+
   // --- Config & Status (for ConfigScreen) ---
 
   Future<Map<String, dynamic>?> fetchConfig() async {

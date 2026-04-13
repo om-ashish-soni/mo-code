@@ -64,6 +64,8 @@ const (
 	TypeConfigCurrent      = "config.current"
 	TypeServerStatus       = "server.status"
 	TypeError              = "error"
+	TypeRuntimeSetup       = "runtime.setup"
+	TypeRuntimeReady       = "runtime.ready"
 )
 
 // ---------------------------------------------------------------------------
@@ -241,6 +243,27 @@ type ErrorPayload struct {
 	Message     string `json:"message"`
 	Recoverable bool   `json:"recoverable,omitempty"`
 	Suggestion  string `json:"suggestion,omitempty"`
+}
+
+// ---------------------------------------------------------------------------
+// Runtime payloads (proot + Alpine)
+// ---------------------------------------------------------------------------
+
+// RuntimeSetupPayload is sent during proot environment bootstrap and
+// package installation to show progress in the Flutter UI.
+type RuntimeSetupPayload struct {
+	Phase    string   `json:"phase"`              // "bootstrap", "detecting", "installing"
+	Message  string   `json:"message"`            // human-readable status
+	Packages []string `json:"packages,omitempty"` // packages being installed
+	Progress float64  `json:"progress,omitempty"` // 0.0 to 1.0
+}
+
+// RuntimeReadyPayload is sent when the proot environment is ready.
+type RuntimeReadyPayload struct {
+	Runtime       string   `json:"runtime"`                  // "proot" or "host"
+	RootFSSizeMB  int      `json:"rootfs_size_mb,omitempty"` // Alpine rootfs size
+	ProjectTypes  []string `json:"project_types,omitempty"`  // detected types
+	InstalledPkgs []string `json:"installed_pkgs,omitempty"` // packages installed
 }
 
 // ---------------------------------------------------------------------------

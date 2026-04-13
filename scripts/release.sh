@@ -2,11 +2,26 @@
 # Build release AAB for Play Store upload
 #
 # Prerequisites:
-#   1. Generate keystore:
-#      keytool -genkey -v -keystore mocode-release.keystore -alias mocode \
-#        -keyalg RSA -keysize 2048 -validity 10000
-#   2. Create flutter/android/key.properties from key.properties.example
-#   3. Flutter SDK installed
+#   1. JDK 21 installed (openjdk-21-jdk, not just JRE)
+#   2. Flutter SDK installed and on PATH
+#   3. Keystore generated (one-time):
+#        cd flutter
+#        keytool -genkey -v -keystore mocode-release.keystore -alias mocode \
+#          -keyalg RSA -keysize 2048 -validity 10000
+#   4. flutter/android/key.properties created with:
+#        storePassword=<password>
+#        keyPassword=<password>
+#        keyAlias=mocode
+#        storeFile=../../mocode-release.keystore
+#      NOTE: storeFile is relative to flutter/android/app/ (where build.gradle.kts lives),
+#            so ../../ points back to flutter/ where the keystore lives.
+#
+# Output:
+#   flutter/build/app/outputs/bundle/release/app-release.aab
+#
+# Usage:
+#   ./scripts/release.sh           # full clean build
+#   ./scripts/release.sh --quick   # skip clean + analysis
 
 set -e
 
@@ -14,6 +29,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 FLUTTER_DIR="$PROJECT_DIR/flutter"
 ANDROID_DIR="$FLUTTER_DIR/android"
+QUICK=false
+
+if [ "$1" = "--quick" ]; then
+    QUICK=true
+fi
 
 echo "=== Mo-Code Release Build ==="
 echo ""
@@ -25,7 +45,14 @@ if ! command -v flutter &> /dev/null; then
     echo "✗ Flutter SDK not found"
     ERRORS=$((ERRORS + 1))
 else
-    echo "✓ Flutter: $(flutter --version | head -1)"
+    echo "✓ Flutter: $(flutter --version 2>&1 | head -1)"
+fi
+
+if ! command -v javac &> /dev/null; then
+    echo "✗ javac not found — install openjdk-21-jdk (not just JRE)"
+    ERRORS=$((ERRORS + 1))
+else
+    echo "✓ javac: $(javac -version 2>&1)"
 fi
 
 if [ ! -d "$FLUTTER_DIR" ]; then
@@ -37,7 +64,7 @@ fi
 
 if [ ! -f "$ANDROID_DIR/key.properties" ]; then
     echo "✗ key.properties not found at $ANDROID_DIR/key.properties"
-    echo "  Copy from key.properties.example and fill in your keystore credentials"
+    echo "  Create it with storePassword, keyPassword, keyAlias, storeFile fields"
     ERRORS=$((ERRORS + 1))
 else
     echo "✓ key.properties found"
@@ -47,15 +74,31 @@ fi
 if [ -f "$ANDROID_DIR/key.properties" ]; then
     STORE_FILE=$(grep "storeFile" "$ANDROID_DIR/key.properties" | cut -d= -f2 | xargs)
     if [ -n "$STORE_FILE" ]; then
-        # Resolve relative path from android/ directory
-        STORE_PATH="$ANDROID_DIR/$STORE_FILE"
+        # storeFile is relative to android/app/ (where build.gradle.kts resolves it)
+        STORE_PATH="$ANDROID_DIR/app/$STORE_FILE"
         if [ -f "$STORE_PATH" ]; then
-            echo "✓ Keystore found: $STORE_PATH"
+            echo "✓ Keystore found: $(realpath "$STORE_PATH")"
         else
-            echo "✗ Keystore not found: $STORE_PATH"
-            echo "  Generate with: keytool -genkey -v -keystore $STORE_PATH -alias mocode -keyalg RSA -keysize 2048 -validity 10000"
+            echo "✗ Keystore not found: $STORE_PATH (resolved from storeFile=$STORE_FILE)"
+            echo "  storeFile in key.properties is relative to flutter/android/app/"
+            echo "  Generate keystore: cd flutter && keytool -genkey -v -keystore mocode-release.keystore -alias mocode -keyalg RSA -keysize 2048 -validity 10000"
             ERRORS=$((ERRORS + 1))
         fi
+    fi
+fi
+
+# Check org.gradle.java.home is set (avoids Gradle toolchain detection bugs)
+if [ -f "$ANDROID_DIR/gradle.properties" ]; then
+    if grep -q "org.gradle.java.home" "$ANDROID_DIR/gradle.properties"; then
+        JAVA_HOME_GRADLE=$(grep "org.gradle.java.home" "$ANDROID_DIR/gradle.properties" | cut -d= -f2 | xargs)
+        if [ -d "$JAVA_HOME_GRADLE" ]; then
+            echo "✓ Gradle JAVA_HOME: $JAVA_HOME_GRADLE"
+        else
+            echo "✗ Gradle JAVA_HOME points to missing dir: $JAVA_HOME_GRADLE"
+            ERRORS=$((ERRORS + 1))
+        fi
+    else
+        echo "⚠ org.gradle.java.home not set in gradle.properties — Gradle may fail to detect JDK"
     fi
 fi
 
@@ -73,16 +116,22 @@ VERSION=$(grep "^version:" pubspec.yaml | head -1 | awk '{print $2}')
 echo "Building version: $VERSION"
 echo ""
 
-# Clean previous build artifacts
-echo "Cleaning previous builds..."
-flutter clean
-flutter pub get
+if [ "$QUICK" = false ]; then
+    # Clean previous build artifacts
+    echo "Cleaning previous builds..."
+    flutter clean
+    flutter pub get
 
-# Run analysis before building
-echo ""
-echo "Running analysis..."
-dart analyze lib/
-echo ""
+    # Run analysis before building
+    echo ""
+    echo "Running analysis..."
+    dart analyze lib/
+    echo ""
+else
+    echo "Quick mode — skipping clean + analysis"
+    flutter pub get --offline 2>/dev/null || flutter pub get
+    echo ""
+fi
 
 # Build release AAB
 echo "Building release AAB..."
@@ -101,7 +150,7 @@ if [ -f "$AAB_PATH" ]; then
     echo "  1. Go to https://play.google.com/console"
     echo "  2. Select 'mo-code' app"
     echo "  3. Release > Internal testing > Create new release"
-    echo "  4. Upload $AAB_PATH"
+    echo "  4. Upload the AAB file above"
     echo "  5. Add release notes and roll out"
     echo "============================================"
 else
