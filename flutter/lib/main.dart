@@ -43,12 +43,13 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
+  final _agentKey = GlobalKey<AgentScreenState>();
 
-  final _screens = const [
-    AgentScreen(),
-    FilesScreen(),
-    TasksScreen(),
-    ConfigScreen(),
+  late final List<Widget> _screens = [
+    AgentScreen(key: _agentKey),
+    const FilesScreen(),
+    const TasksScreen(),
+    const ConfigScreen(),
   ];
 
   @override
@@ -148,6 +149,10 @@ class _MainScreenState extends State<MainScreen> {
       ),
     ).then((result) {
       if (result is Map && result['action'] == 'resume') {
+        final sessionId = result['session_id'] as String?;
+        if (sessionId != null) {
+          _agentKey.currentState?.resumeFromSession(sessionId);
+        }
         setState(() => _currentIndex = 0);
       }
     });

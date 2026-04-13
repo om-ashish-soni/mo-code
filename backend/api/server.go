@@ -352,6 +352,10 @@ func (c *wsClient) dispatch(raw RawMessage) {
 		c.handleSessionResume(raw)
 	case TypeSessionDelete:
 		c.handleSessionDelete(raw)
+	case TypeSessionInfo:
+		c.handleSessionInfo(raw)
+	case TypeSessionClear:
+		c.handleSessionClear(raw)
 
 	// ----- Filesystem (stub for now — OpenCode will implement) -----
 	case TypeFSList, TypeFSRead:
@@ -701,6 +705,21 @@ func (c *wsClient) handleSessionResume(raw RawMessage) {
 		return
 	}
 
+	// Emit session metadata so the UI can show "Resumed session (N messages)".
+	c.send(OutMessage{
+		Type: TypeSessionInfoResult,
+		ID:   raw.ID,
+		Payload: SessionInfoResultPayload{
+			ID:              sess.ID,
+			Title:           sess.Title,
+			MessageCount:    len(sess.Messages),
+			TokensUsed:      sess.TokensUsed,
+			State:           sess.State,
+			Provider:        sess.Provider,
+			CompactionCount: sess.CompactionCount,
+		},
+	})
+
 	// Resume by starting a task with the session ID so the engine
 	// can restore context from the persisted session.
 	req := agent.TaskRequest{
@@ -772,6 +791,62 @@ func (c *wsClient) handleSessionDelete(raw RawMessage) {
 		Type:    TypeSessionListResult,
 		ID:      raw.ID,
 		Payload: c.server.Sessions.List(),
+	})
+}
+
+func (c *wsClient) handleSessionInfo(raw RawMessage) {
+	if c.server.Sessions == nil {
+		c.sendError(raw.ID, ErrInternalError, "session persistence not enabled")
+		return
+	}
+	var payload SessionInfoPayload
+	if err := json.Unmarshal(raw.Payload, &payload); err != nil {
+		c.sendError(raw.ID, ErrInvalidPayload, "invalid session.info payload")
+		return
+	}
+	sess := c.server.Sessions.Get(payload.ID)
+	if sess == nil {
+		c.sendError(raw.ID, ErrInternalError, fmt.Sprintf("session %s not found", payload.ID))
+		return
+	}
+	c.send(OutMessage{
+		Type: TypeSessionInfoResult,
+		ID:   raw.ID,
+		Payload: SessionInfoResultPayload{
+			ID:              sess.ID,
+			Title:           sess.Title,
+			MessageCount:    len(sess.Messages),
+			TokensUsed:      sess.TokensUsed,
+			State:           sess.State,
+			Provider:        sess.Provider,
+			CompactionCount: sess.CompactionCount,
+		},
+	})
+}
+
+func (c *wsClient) handleSessionClear(raw RawMessage) {
+	if c.server.Sessions == nil {
+		c.sendError(raw.ID, ErrInternalError, "session persistence not enabled")
+		return
+	}
+	var payload SessionClearPayload
+	if err := json.Unmarshal(raw.Payload, &payload); err != nil {
+		c.sendError(raw.ID, ErrInvalidPayload, "invalid session.clear payload")
+		return
+	}
+	if err := c.server.Sessions.ClearMessages(payload.ID); err != nil {
+		c.sendError(raw.ID, ErrInternalError, err.Error())
+		return
+	}
+	c.send(OutMessage{
+		Type: TypeSessionClearResult,
+		ID:   raw.ID,
+		Payload: SessionInfoResultPayload{
+			ID:           payload.ID,
+			MessageCount: 0,
+			TokensUsed:   0,
+			State:        "active",
+		},
 	})
 }
 

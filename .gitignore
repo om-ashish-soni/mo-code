@@ -61,6 +61,9 @@ backend/headless-twitter-2/
 backend/tweet2/
 backend/twitter/
 backend/storage/
+backend/agentic-push/
+backend/test_copilot_models.go
+tweet3/
 
 # Flutter SDK
 flutter_linux_*.tar.xz

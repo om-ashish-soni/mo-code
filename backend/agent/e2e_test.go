@@ -295,6 +295,227 @@ func TestE2E_EngineInfo(t *testing.T) {
 	}
 }
 
+// --- Multi-turn context continuity (FEAT-003) ---
+
+func TestE2E_MultiTurnContextContinuity(t *testing.T) {
+	// 3 sequential prompts on the same session ID.
+	// Each turn, the mock provider records the messages it received
+	// so we can verify history accumulates.
+	dir := t.TempDir()
+	store, _ := agentctx.NewSessionStore(dir)
+
+	var receivedMsgCounts []int
+
+	// We need a provider that records how many messages it receives each call.
+	// Use a custom provider for this.
+	mp := &recordingProvider{
+		name:       "recorder",
+		msgCounts:  &receivedMsgCounts,
+		responses: [][]provider.StreamChunk{
+			// Turn 1 response
+			{{Text: "Response to turn 1."}, {Done: true, Usage: &provider.Usage{InputTokens: 50, OutputTokens: 10}}},
+			// Turn 2 response
+			{{Text: "Response to turn 2."}, {Done: true, Usage: &provider.Usage{InputTokens: 100, OutputTokens: 15}}},
+			// Turn 3 response
+			{{Text: "Response to turn 3."}, {Done: true, Usage: &provider.Usage{InputTokens: 150, OutputTokens: 20}}},
+		},
+	}
+
+	reg := &mockRegistry{p: mp}
+
+	// Turn 1: fresh session
+	e1 := NewEngine(reg, "/tmp", store)
+	events1, err := e1.Start(context.Background(), TaskRequest{
+		ID:     "multi-turn-1",
+		Prompt: "What is 2+2?",
+	})
+	if err != nil {
+		t.Fatalf("Turn 1 Start: %v", err)
+	}
+	for range events1 {
+	}
+
+	// Turn 2: same session ID → should resume with history
+	mp.callIdx = 1
+	e2 := NewEngine(reg, "/tmp", store)
+	events2, err := e2.Start(context.Background(), TaskRequest{
+		ID:     "multi-turn-1",
+		Prompt: "Now what is 3+3?",
+	})
+	if err != nil {
+		t.Fatalf("Turn 2 Start: %v", err)
+	}
+	for range events2 {
+	}
+
+	// Turn 3: same session ID → should have full history
+	mp.callIdx = 2
+	e3 := NewEngine(reg, "/tmp", store)
+	events3, err := e3.Start(context.Background(), TaskRequest{
+		ID:     "multi-turn-1",
+		Prompt: "And 4+4?",
+	})
+	if err != nil {
+		t.Fatalf("Turn 3 Start: %v", err)
+	}
+	for range events3 {
+	}
+
+	// Verify message counts increased each turn.
+	// Turn 1: system + 1 user = provider sees 1 user message
+	// Turn 2: system + 1 user + 1 assistant + 1 user = provider sees 3 messages (+ system)
+	// Turn 3: system + 1u + 1a + 1u + 1a + 1u = provider sees 5 messages (+ system)
+	if len(receivedMsgCounts) != 3 {
+		t.Fatalf("expected 3 provider calls, got %d", len(receivedMsgCounts))
+	}
+	// Each turn should see more messages than the previous.
+	for i := 1; i < len(receivedMsgCounts); i++ {
+		if receivedMsgCounts[i] <= receivedMsgCounts[i-1] {
+			t.Errorf("turn %d received %d messages, should be more than turn %d's %d",
+				i+1, receivedMsgCounts[i], i, receivedMsgCounts[i-1])
+		}
+	}
+
+	// Verify session has all messages persisted.
+	sess := store.Get("multi-turn-1")
+	if sess == nil {
+		t.Fatal("session not found")
+	}
+	// 3 user + 3 assistant = 6 messages minimum
+	if len(sess.Messages) < 6 {
+		t.Errorf("expected at least 6 messages in session, got %d", len(sess.Messages))
+	}
+}
+
+// --- Concurrent task guard ---
+
+func TestE2E_ConcurrentTaskGuard(t *testing.T) {
+	dir := t.TempDir()
+	store, _ := agentctx.NewSessionStore(dir)
+
+	// Start a long-running task using channel provider.
+	slowCh := make(chan provider.StreamChunk, 10)
+	mp := &channelProvider{name: "slow", ch: slowCh}
+	reg := &mockRegistry{p: mp}
+	e := NewEngine(reg, "/tmp", store)
+
+	events, err := e.Start(context.Background(), TaskRequest{
+		ID:     "guard-test",
+		Prompt: "Do something slow",
+	})
+	if err != nil {
+		t.Fatalf("First Start: %v", err)
+	}
+
+	// Try to start another task on the same session ID while the first is running.
+	_, err = e.Start(context.Background(), TaskRequest{
+		ID:     "guard-test",
+		Prompt: "This should be rejected",
+	})
+	if err == nil {
+		t.Fatal("expected error when starting concurrent task on same session")
+	}
+
+	// Clean up: unblock the provider and drain the event channel.
+	e.Cancel("guard-test")
+	close(slowCh)
+	for range events {
+	}
+}
+
+// --- Provider switch mid-session ---
+
+func TestE2E_ProviderSwitchMidSession(t *testing.T) {
+	dir := t.TempDir()
+	store, _ := agentctx.NewSessionStore(dir)
+
+	// Turn 1: use provider "alpha"
+	mpAlpha := newMockProvider([][]provider.StreamChunk{
+		{{Text: "Alpha response."}, {Done: true, Usage: &provider.Usage{InputTokens: 30, OutputTokens: 10}}},
+	})
+	mpAlpha.name = "alpha"
+
+	regAlpha := &mockRegistry{p: mpAlpha}
+	e1 := NewEngine(regAlpha, "/tmp", store)
+
+	events1, _ := e1.Start(context.Background(), TaskRequest{
+		ID:     "switch-test",
+		Prompt: "Hello from alpha",
+	})
+	for range events1 {
+	}
+
+	// Turn 2: switch to provider "beta" — same session ID
+	mpBeta := &recordingProvider{
+		name:      "beta",
+		msgCounts: new([]int),
+		responses: [][]provider.StreamChunk{
+			{{Text: "Beta response."}, {Done: true, Usage: &provider.Usage{InputTokens: 60, OutputTokens: 12}}},
+		},
+	}
+	regBeta := &mockRegistry{p: mpBeta}
+	e2 := NewEngine(regBeta, "/tmp", store)
+
+	events2, err := e2.Start(context.Background(), TaskRequest{
+		ID:       "switch-test",
+		Prompt:   "Hello from beta",
+		Provider: "beta",
+	})
+	if err != nil {
+		t.Fatalf("Turn 2 Start: %v", err)
+	}
+	for range events2 {
+	}
+
+	// Beta should have received the full history including alpha's messages.
+	if len(*mpBeta.msgCounts) != 1 {
+		t.Fatalf("expected 1 provider call, got %d", len(*mpBeta.msgCounts))
+	}
+	// Should see: user("Hello from alpha") + assistant("Alpha response.") + user("Hello from beta") = 3+ messages
+	if (*mpBeta.msgCounts)[0] < 3 {
+		t.Errorf("beta received %d messages, expected at least 3 (history should carry over)", (*mpBeta.msgCounts)[0])
+	}
+
+	// Verify session persists both turns.
+	sess := store.Get("switch-test")
+	if len(sess.Messages) < 4 {
+		t.Errorf("expected at least 4 messages, got %d", len(sess.Messages))
+	}
+}
+
+// --- recordingProvider: tracks how many messages are passed to Stream ---
+
+type recordingProvider struct {
+	name      string
+	responses [][]provider.StreamChunk
+	callIdx   int
+	msgCounts *[]int // pointer to shared slice so multiple engines can share
+}
+
+func (p *recordingProvider) Name() string                    { return p.name }
+func (p *recordingProvider) Configured() bool                { return true }
+func (p *recordingProvider) Configure(provider.Config) error { return nil }
+
+func (p *recordingProvider) Stream(ctx context.Context, msgs []provider.Message, tools []provider.ToolDef) (<-chan provider.StreamChunk, error) {
+	*p.msgCounts = append(*p.msgCounts, len(msgs))
+
+	ch := make(chan provider.StreamChunk, 32)
+	go func() {
+		defer close(ch)
+		if p.callIdx < len(p.responses) {
+			for _, chunk := range p.responses[p.callIdx] {
+				select {
+				case <-ctx.Done():
+					return
+				case ch <- chunk:
+				}
+			}
+			p.callIdx++
+		}
+	}()
+	return ch, nil
+}
+
 // --- channelProvider: lets tests control streaming manually ---
 
 type channelProvider struct {

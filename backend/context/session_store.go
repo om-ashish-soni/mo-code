@@ -26,8 +26,9 @@ type Session struct {
 	WorkspaceDir string             `json:"workspace_dir"`
 	Provider     string             `json:"provider"`
 	Model        string             `json:"model,omitempty"`
-	TokensUsed   int                `json:"tokens_used"`
-	State        string             `json:"state"` // "active", "completed", "canceled", "failed"
+	TokensUsed      int                `json:"tokens_used"`
+	CompactionCount int                `json:"compaction_count"`
+	State           string             `json:"state"` // "active", "completed", "canceled", "failed"
 }
 
 // SessionSummary is a lightweight view for listing sessions without loading messages.
@@ -90,11 +91,20 @@ func (s *SessionStore) Create(id, prompt, workspaceDir, providerName, model stri
 	return sess, nil
 }
 
-// Get returns a session by ID, or nil if not found.
+// Get returns a snapshot copy of a session by ID, or nil if not found.
+// The returned Session is safe to read without holding any lock.
 func (s *SessionStore) Get(id string) *Session {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.sessions[id]
+	sess, ok := s.sessions[id]
+	if !ok {
+		return nil
+	}
+	// Return a shallow copy with a cloned Messages slice to avoid races.
+	cp := *sess
+	cp.Messages = make([]provider.Message, len(sess.Messages))
+	copy(cp.Messages, sess.Messages)
+	return &cp
 }
 
 // AppendMessage adds a message to a session and persists it.
@@ -136,6 +146,39 @@ func (s *SessionStore) UpdateTokens(id string, tokens int) error {
 		return fmt.Errorf("session %s not found", id)
 	}
 	sess.TokensUsed = tokens
+	sess.UpdatedAt = time.Now()
+	s.mu.Unlock()
+
+	return s.writeToDisk(sess)
+}
+
+// ClearMessages resets a session's message history and token count without
+// deleting the session. Used for /clear — the session ID persists but context is wiped.
+func (s *SessionStore) ClearMessages(id string) error {
+	s.mu.Lock()
+	sess, ok := s.sessions[id]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("session %s not found", id)
+	}
+	sess.Messages = nil
+	sess.TokensUsed = 0
+	sess.State = "active"
+	sess.UpdatedAt = time.Now()
+	s.mu.Unlock()
+
+	return s.writeToDisk(sess)
+}
+
+// IncrementCompaction bumps the compaction counter for a session.
+func (s *SessionStore) IncrementCompaction(id string) error {
+	s.mu.Lock()
+	sess, ok := s.sessions[id]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("session %s not found", id)
+	}
+	sess.CompactionCount++
 	sess.UpdatedAt = time.Now()
 	s.mu.Unlock()
 

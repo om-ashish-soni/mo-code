@@ -121,6 +121,14 @@ func (e *Engine) Start(ctx context.Context, req TaskRequest) (<-chan Event, erro
 		}
 	}
 
+	// Guard: reject if a task is already running on this session ID.
+	e.mu.RLock()
+	if existing, ok := e.tasks[req.ID]; ok && existing.info.State == StateRunning {
+		e.mu.RUnlock()
+		return nil, fmt.Errorf("task already running on session %s — wait for it to complete or cancel it first", req.ID)
+	}
+	e.mu.RUnlock()
+
 	// Track this task.
 	taskCtx, taskCancel := context.WithCancel(ctx)
 	e.mu.Lock()
@@ -198,6 +206,10 @@ func (e *Engine) runLoop(
 					TaskID:  taskID,
 					Kind:    EventText,
 					Content: "[context compacted]\n",
+				}
+				// Track compaction count in the session.
+				if e.sessions != nil {
+					_ = e.sessions.IncrementCompaction(taskID)
 				}
 			}
 		}

@@ -1,19 +1,59 @@
 # Mo-Code Checkpoint
 
 ## Last updated
-2026-04-13 by Claude (C2, FEAT-002 proot+Alpine Flutter/Android + Play Store deployment)
+2026-04-13 by Claude (C2, FEAT-003 backend hardening — COMPLETE)
 
 ## Handoff note
-FEAT-002 proot+Alpine runtime: COMPLETE (C1 backend + C2 Flutter/Android). Full proot + Alpine Linux on-device execution environment. Shell commands route through proot when available. Auto-detection of project types, auto-install of tools via apk.
+FEAT-002 proot+Alpine: COMPLETE. FEAT-003 session context continuity: C2 (backend hardening) COMPLETE, C1 and C3 pending.
 
-Architecture: Custom Go daemon with agent engine, 6 providers (Claude, Gemini, Copilot, OpenRouter, Ollama, Azure). Flutter app with 5 screens (Agent, Files, Tasks, Config, Sessions). Localhost HTTP + WebSocket. Android foreground service keeps daemon alive when backgrounded. All providers have retry with exponential backoff, HTTP timeouts, and connection pooling. WebSocket auto-reconnects on disconnect. proot + Alpine Linux runtime for on-device code execution.
+**Critical bug found:** Multi-turn conversations have NO context between prompts. Each prompt creates a new isolated task. The backend machinery (SessionStore, resume, compaction) all works — the break is in Flutter's agent_screen.dart which generates a new task ID every time instead of reusing a session ID.
 
-**Play Store release:** Version 1.1.0+2, compileSdk 36. Release AAB builds successfully (44.3MB). `./scripts/release.sh` works. Keystore + key.properties configured. ISSUE-009 (Java toolchain) RESOLVED. See `docs/PLAY_STORE_DEPLOYMENT.md` for full deployment guide.
+**FEAT-003 assignments — read `docs/features/FEAT-003-session-context-continuity.md` for full spec:**
 
-**Build status:** `flutter analyze` clean (1 info-level lint). `go build ./...`, `go test ./...`, `go vet ./...` all clean.
+| Claude | Scope | Key files | Status |
+|--------|-------|-----------|--------|
+| **C1** | Flutter agent screen — session ID lifecycle, startTask vs resumeSession routing, /clear reset | `agent_screen.dart`, `daemon.dart` | **COMPLETE** |
+| **C2** | Backend hardening — session.info, session.clear message types, compaction counter, concurrent task guard | `server.go`, `messages.go`, `session_store.go`, `engine.go` | **COMPLETE** |
+| **C3** | Testing — multi-turn e2e, compaction under resume, concurrent access, reconnect mid-session | `e2e_test.go`, `session_store_test.go`, `compaction_test.go` | NOT STARTED |
+
+**No file conflicts between C1/C2/C3.** All can start in parallel.
+
+**Build status:** `go build ./...`, `go test ./...`, `go vet ./...` all clean. `flutter analyze` clean (1 info-level lint).
 
 ## Current phase
-Ready for Play Store upload. All features complete, all tests passing.
+FEAT-003: Session Context Continuity — C1 (Flutter) and C2 (Backend) COMPLETE. C3 (Testing) pending.
+
+## FEAT-003: Session Context Continuity — PENDING
+**Bug:** `agent_screen.dart:430` generates new task ID per prompt → backend sees each as independent session → LLM has zero context from prior turns.
+**Fix:** Track session ID in agent screen state. First prompt = `task.start`. Follow-ups = `session.resume`. Backend already handles this correctly.
+**Spec:** `docs/features/FEAT-003-session-context-continuity.md`
+
+### C1 (Flutter) — COMPLETE
+- [x] Add `_sessionId` state to `_AgentScreenState`
+- [x] Generate session ID on first prompt, reuse for follow-ups
+- [x] First prompt → `startTask()` with session ID; follow-ups → `resumeSession()`
+- [x] `/clear` resets `_sessionId`; session resume from Sessions screen sets `_sessionId`
+- [x] Show session indicator in status bar
+- [x] `task.complete`/`task.failed` keep `_sessionId` (session persists across tasks)
+Files: `flutter/lib/screens/agent_screen.dart`, `flutter/lib/api/daemon.dart`
+
+### C2 (Backend) — COMPLETE
+- [x] Add `session.info` message type (client requests session metadata without full history)
+- [x] Add `session.clear` message type (reset messages without deleting session)
+- [x] Add `CompactionCount` field to Session struct, increment on compaction
+- [x] Emit session metadata after successful resume
+- [x] Handle `task.start` while task already running on same session (error guard)
+Files: `backend/api/server.go`, `backend/api/messages.go`, `backend/context/session_store.go`, `backend/agent/engine.go`
+
+### C3 (Testing) — NOT STARTED
+- [ ] E2E: multi-turn conversation (3 prompts, verify message accumulation)
+- [ ] E2E: session resume after daemon restart
+- [ ] E2E: compaction triggers during multi-turn
+- [ ] Test: concurrent session access (mutex safety)
+- [ ] Test: 100+ messages (FIFO trimming)
+- [ ] Test: WebSocket reconnect mid-session
+- [ ] Test: provider switch mid-session
+Files: `backend/agent/e2e_test.go`, `backend/context/session_store_test.go`, `backend/context/compaction_test.go`
 
 ## FEAT-002: proot + Alpine Runtime — IN PROGRESS
 ### C1 (Backend Go) — COMPLETE
