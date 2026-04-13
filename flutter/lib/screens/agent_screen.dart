@@ -33,6 +33,11 @@ class _AgentScreenState extends State<AgentScreen> {
   Timer? _reconnectTimer;
   static const _maxReconnectDelay = Duration(seconds: 30);
 
+  // Bootstrap progress (shown during first launch extraction)
+  String? _bootstrapMessage;
+  int? _bootstrapPercent;
+  Timer? _bootstrapPollTimer;
+
   // Track subscriptions for cleanup
   StreamSubscription? _messageSub;
   StreamSubscription? _connectionSub;
@@ -46,6 +51,7 @@ class _AgentScreenState extends State<AgentScreen> {
   @override
   void dispose() {
     _reconnectTimer?.cancel();
+    _bootstrapPollTimer?.cancel();
     _messageSub?.cancel();
     _connectionSub?.cancel();
     super.dispose();
@@ -53,7 +59,32 @@ class _AgentScreenState extends State<AgentScreen> {
 
   Future<void> _initConnection() async {
     await Future.delayed(const Duration(milliseconds: 300));
+    _startBootstrapPolling();
     await _attemptConnect();
+  }
+
+  /// Poll the platform channel for runtime bootstrap progress.
+  void _startBootstrapPolling() {
+    _bootstrapPollTimer?.cancel();
+    _bootstrapPollTimer = Timer.periodic(const Duration(milliseconds: 500), (_) async {
+      if (_connected || !mounted) {
+        _bootstrapPollTimer?.cancel();
+        return;
+      }
+      final api = context.read<OpenCodeAPI>();
+      final status = await api.getRuntimeStatus();
+      if (!mounted || _connected) return;
+      if (status != null) {
+        final progress = status['progress'] as String?;
+        final percent = status['progress_percent'] as int?;
+        if (progress != null && progress.isNotEmpty) {
+          setState(() {
+            _bootstrapMessage = progress;
+            _bootstrapPercent = percent;
+          });
+        }
+      }
+    });
   }
 
   Future<void> _attemptConnect() async {
@@ -61,11 +92,14 @@ class _AgentScreenState extends State<AgentScreen> {
     try {
       await api.connect();
       if (!mounted) return;
+      _bootstrapPollTimer?.cancel();
       setState(() {
         _connected = true;
         _initializing = false;
         _reconnecting = false;
         _reconnectAttempt = 0;
+        _bootstrapMessage = null;
+        _bootstrapPercent = null;
       });
       _addLine(TerminalLine(type: TerminalLineType.text, content: 'Connected to mo-code daemon'));
 
@@ -506,26 +540,43 @@ class _AgentScreenState extends State<AgentScreen> {
         children: [
           ShimmerLoading(
             child: Container(
-              width: 48,
-              height: 48,
+              width: 56,
+              height: 56,
               decoration: BoxDecoration(
                 color: AppColors.surface,
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
               ),
               child: const Icon(Icons.terminal, color: AppColors.purple, size: 28),
             ),
           ),
-          const SizedBox(height: 16),
-          const Text(
-            'Connecting to daemon...',
-            style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+          const SizedBox(height: AppSpacing.xl),
+          Text(
+            _bootstrapMessage ?? 'Connecting to daemon...',
+            style: AppTheme.uiFont(fontSize: 14, color: AppColors.textMuted),
           ),
-          const SizedBox(height: 8),
-          const SizedBox(
-            width: 20,
-            height: 20,
-            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.purple),
-          ),
+          const SizedBox(height: AppSpacing.md),
+          if (_bootstrapPercent != null && _bootstrapPercent! > 0 && _bootstrapPercent! < 100) ...[
+            SizedBox(
+              width: 200,
+              child: LinearProgressIndicator(
+                value: _bootstrapPercent! / 100.0,
+                backgroundColor: AppColors.surface,
+                color: AppColors.purple,
+                minHeight: 4,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              '${_bootstrapPercent}%',
+              style: AppTheme.codeFont(fontSize: 11, color: AppColors.textMuted),
+            ),
+          ] else
+            const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.purple),
+            ),
         ],
       ),
     );
@@ -533,36 +584,42 @@ class _AgentScreenState extends State<AgentScreen> {
 
   Widget _buildStatusBar() {
     return Container(
-      height: 28,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      height: 32,
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
       decoration: const BoxDecoration(
         color: AppColors.background,
-        border: Border(bottom: BorderSide(color: AppColors.border)),
+        border: Border(bottom: BorderSide(color: AppColors.border, width: 0.5)),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const Text(
+          Text(
             'mo-code',
-            style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+            style: AppTheme.uiFont(
+              fontSize: 13,
+              color: AppColors.textMuted,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.5,
+            ),
           ),
           Row(
             children: [
               _ConnectionDot(connected: _connected, reconnecting: _reconnecting),
-              const SizedBox(width: 6),
+              const SizedBox(width: AppSpacing.sm),
               Text(
                 _connected
                     ? _activeProvider
                     : _reconnecting
                         ? 'reconnecting'
                         : 'disconnected',
-                style: TextStyle(
+                style: AppTheme.uiFont(
+                  fontSize: 12,
                   color: _connected
                       ? AppColors.green
                       : _reconnecting
                           ? AppColors.amber
                           : AppColors.textMuted,
-                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ],
@@ -622,23 +679,29 @@ class _ConnectionDotState extends State<_ConnectionDot>
             ? AppColors.amber
             : AppColors.red;
 
-    if (!widget.reconnecting) {
-      return Container(
-        width: 6,
-        height: 6,
-        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-      );
-    }
+    final dot = Container(
+      width: 7,
+      height: 7,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+        boxShadow: [
+          BoxShadow(
+            color: color.withAlpha(80),
+            blurRadius: 4,
+            spreadRadius: 1,
+          ),
+        ],
+      ),
+    );
+
+    if (!widget.reconnecting) return dot;
 
     return FadeTransition(
       opacity: Tween<double>(begin: 0.3, end: 1.0).animate(
         CurvedAnimation(parent: _pulse, curve: Curves.easeInOut),
       ),
-      child: Container(
-        width: 6,
-        height: 6,
-        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-      ),
+      child: dot,
     );
   }
 }

@@ -19,11 +19,11 @@ class ConnectionBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
       decoration: BoxDecoration(
-        color: AppColors.red.withAlpha(20),
+        color: AppColors.red.withAlpha(12),
         border: Border(
-          bottom: BorderSide(color: AppColors.red.withAlpha(60)),
+          bottom: BorderSide(color: AppColors.red.withAlpha(30)),
         ),
       ),
       child: Row(
@@ -37,37 +37,36 @@ class ConnectionBanner extends StatelessWidget {
                 color: AppColors.amber,
               ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: AppSpacing.sm),
             Expanded(
               child: Text(
                 attemptNumber != null
                     ? 'Reconnecting... (attempt $attemptNumber)'
                     : 'Reconnecting...',
-                style: const TextStyle(color: AppColors.amber, fontSize: 12),
+                style: AppTheme.uiFont(fontSize: 12, color: AppColors.amber, fontWeight: FontWeight.w500),
               ),
             ),
           ] else ...[
-            const Icon(Icons.cloud_off, color: AppColors.red, size: 14),
-            const SizedBox(width: 8),
-            const Expanded(
+            const Icon(Icons.cloud_off_rounded, color: AppColors.red, size: 14),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
               child: Text(
                 'Disconnected from daemon',
-                style: TextStyle(color: AppColors.red, fontSize: 12),
+                style: AppTheme.uiFont(fontSize: 12, color: AppColors.red, fontWeight: FontWeight.w500),
               ),
             ),
           ],
           GestureDetector(
             onTap: onRetry,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.xs),
               decoration: BoxDecoration(
                 color: AppColors.surface,
-                borderRadius: BorderRadius.circular(4),
-                border: Border.all(color: AppColors.border),
+                borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
               ),
-              child: const Text(
+              child: Text(
                 'Retry',
-                style: TextStyle(color: AppColors.textPrimary, fontSize: 11),
+                style: AppTheme.uiFont(fontSize: 11, color: AppColors.textPrimary, fontWeight: FontWeight.w500),
               ),
             ),
           ),
@@ -96,39 +95,39 @@ class ErrorStateWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(32),
+        padding: const EdgeInsets.all(AppSpacing.xxxl),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: AppColors.red, size: 48),
-            const SizedBox(height: 16),
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                color: AppColors.redDim,
+                borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+              ),
+              child: Icon(icon, color: AppColors.red, size: 32),
+            ),
+            const SizedBox(height: AppSpacing.lg),
             Text(
               message,
-              style: const TextStyle(color: AppColors.textPrimary, fontSize: 14),
+              style: AppTheme.uiFont(fontSize: 15, color: AppColors.textPrimary, fontWeight: FontWeight.w500),
               textAlign: TextAlign.center,
             ),
             if (detail != null) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: AppSpacing.sm),
               Text(
                 detail!,
-                style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+                style: AppTheme.uiFont(fontSize: 12, color: AppColors.textMuted),
                 textAlign: TextAlign.center,
               ),
             ],
             if (onRetry != null) ...[
-              const SizedBox(height: 20),
+              const SizedBox(height: AppSpacing.xl),
               ElevatedButton.icon(
                 onPressed: onRetry,
-                icon: const Icon(Icons.refresh, size: 16),
+                icon: const Icon(Icons.refresh_rounded, size: 16),
                 label: const Text('Retry'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.purple,
-                  foregroundColor: AppColors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
               ),
             ],
           ],

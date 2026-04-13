@@ -1,20 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import '../theme/colors.dart';
 
 /// GitHub Copilot models — the single Copilot provider serves all of these.
-/// Reference: https://docs.github.com/en/copilot/using-github-copilot/ai-models/changing-the-ai-model-for-copilot-chat
 const copilotModels = [
   _ModelDef('gpt-4o', 'GPT-4o', 'Fast, balanced'),
   _ModelDef('gpt-4.1', 'GPT-4.1', 'Latest GPT'),
-  _ModelDef('o4-mini', 'o4-mini', 'Reasoning, compact'),
-  _ModelDef('o3-mini', 'o3-mini', 'Reasoning'),
-  _ModelDef('claude-sonnet-4', 'Claude Sonnet 4', 'Anthropic'),
-  _ModelDef('claude-3.5-sonnet', 'Claude 3.5 Sonnet', 'Anthropic'),
-  _ModelDef('gemini-2.0-flash', 'Gemini 2.0 Flash', 'Google, fast'),
+  _ModelDef('gpt-5-mini', 'GPT-5 Mini', 'Compact, latest'),
+  _ModelDef('gpt-4o-mini', 'GPT-4o Mini', 'Fast, cheap'),
+  _ModelDef('claude-haiku-4.5', 'Claude Haiku 4.5', 'Anthropic, fast'),
   _ModelDef('gemini-2.5-pro', 'Gemini 2.5 Pro', 'Google, advanced'),
+  _ModelDef('grok-code-fast-1', 'Grok Code Fast', 'xAI, code'),
 ];
 
-/// Direct-provider models (when using your own API key).
 const claudeModels = [
   _ModelDef('claude-sonnet-4-20250514', 'Claude Sonnet 4', 'Latest'),
   _ModelDef('claude-3.5-haiku-20241022', 'Claude 3.5 Haiku', 'Fast'),
@@ -32,8 +31,6 @@ class _ModelDef {
   const _ModelDef(this.id, this.label, this.description);
 }
 
-/// Compact provider bar shown at the top of the agent screen.
-/// Tapping opens the model picker bottom sheet.
 class ProviderSwitcher extends StatelessWidget {
   final String activeProvider;
   final String activeModel;
@@ -51,46 +48,56 @@ class ProviderSwitcher extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => _showModelPicker(context),
+      onTap: () {
+        HapticFeedback.selectionClick();
+        _showModelPicker(context);
+      },
       child: Container(
-        height: 36,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        decoration: const BoxDecoration(
-          color: AppColors.panel,
-          border: Border(bottom: BorderSide(color: AppColors.border)),
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+        decoration: BoxDecoration(
+          color: AppColors.panel.withAlpha(200),
+          border: const Border(bottom: BorderSide(color: AppColors.border, width: 0.5)),
         ),
         child: Row(
           children: [
             // Provider pill
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                color: AppColors.purple.withAlpha(30),
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: AppColors.purple.withAlpha(60)),
+                color: AppColors.purpleDim,
+                borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
               ),
               child: Text(
                 _providerLabel(activeProvider),
-                style: const TextStyle(
-                  color: AppColors.purple,
-                  fontSize: 11,
+                style: AppTheme.uiFont(
+                  fontSize: 12,
+                  color: AppColors.purpleLight,
                   fontWeight: FontWeight.w600,
                 ),
               ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: AppSpacing.md),
             // Active model
             Expanded(
               child: Text(
                 activeModel,
-                style: const TextStyle(
-                  color: AppColors.textPrimary,
-                  fontSize: 12,
+                style: AppTheme.uiFont(
+                  fontSize: 13,
+                  color: AppColors.textSecondary,
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            const Icon(Icons.unfold_more, color: AppColors.textMuted, size: 16),
+            Container(
+              width: 24,
+              height: 24,
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Icon(Icons.unfold_more, color: AppColors.textMuted, size: 14),
+            ),
           ],
         ),
       ),
@@ -99,7 +106,7 @@ class ProviderSwitcher extends StatelessWidget {
 
   String _providerLabel(String provider) {
     return switch (provider) {
-      'copilot' => 'GitHub Copilot',
+      'copilot' => 'Copilot',
       'claude' => 'Claude',
       'gemini' => 'Gemini',
       'openrouter' => 'OpenRouter',
@@ -153,14 +160,12 @@ class _ModelPickerSheet extends StatelessWidget {
       minChildSize: 0.3,
       builder: (context, scrollController) {
         return Container(
-          decoration: const BoxDecoration(
+          decoration: BoxDecoration(
             color: AppColors.panel,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
-            border: Border(
-              top: BorderSide(color: AppColors.border),
-              left: BorderSide(color: AppColors.border),
-              right: BorderSide(color: AppColors.border),
+            borderRadius: const BorderRadius.vertical(
+              top: Radius.circular(AppSpacing.radiusXl),
             ),
+            boxShadow: AppColors.elevatedShadow,
           ),
           child: ListView(
             controller: scrollController,
@@ -169,21 +174,49 @@ class _ModelPickerSheet extends StatelessWidget {
               // Handle bar
               Center(
                 child: Container(
-                  margin: const EdgeInsets.only(top: 8, bottom: 4),
-                  width: 32,
+                  margin: const EdgeInsets.only(top: 10, bottom: 6),
+                  width: 36,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: AppColors.textMuted,
+                    color: AppColors.borderLight,
                     borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.lg,
+                  vertical: AppSpacing.sm,
+                ),
+                child: Text(
+                  'Model',
+                  style: AppTheme.uiFont(
+                    fontSize: 18,
+                    color: AppColors.white,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
               // Provider tabs
               _buildProviderTabs(),
-              const Divider(color: AppColors.border, height: 1),
+              const Divider(height: 1, color: AppColors.border),
               // Models for active provider
-              ..._modelsForProvider().map((m) => _buildModelTile(m)),
-              const SizedBox(height: 16),
+              ..._modelsForProvider().asMap().entries.map(
+                (e) => _buildModelTile(e.value)
+                    .animate()
+                    .fadeIn(
+                      delay: (50 * e.key).ms,
+                      duration: 200.ms,
+                    )
+                    .slideX(
+                      begin: 0.05,
+                      end: 0,
+                      delay: (50 * e.key).ms,
+                      duration: 200.ms,
+                      curve: Curves.easeOut,
+                    ),
+              ),
+              const SizedBox(height: AppSpacing.lg),
             ],
           ),
         );
@@ -194,30 +227,38 @@ class _ModelPickerSheet extends StatelessWidget {
   Widget _buildProviderTabs() {
     const providers = ['copilot', 'claude', 'gemini'];
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.lg,
+        vertical: AppSpacing.md,
+      ),
       child: Row(
         children: providers.map((p) {
           final isActive = p == activeProvider;
           return Expanded(
             child: GestureDetector(
-              onTap: isActive ? null : () => onProviderSwitch(p),
-              child: Container(
+              onTap: isActive ? null : () {
+                HapticFeedback.selectionClick();
+                onProviderSwitch(p);
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
                 margin: const EdgeInsets.symmetric(horizontal: 3),
-                padding: const EdgeInsets.symmetric(vertical: 8),
+                padding: const EdgeInsets.symmetric(vertical: 10),
                 decoration: BoxDecoration(
-                  color: isActive ? AppColors.purple.withAlpha(40) : AppColors.background,
-                  borderRadius: BorderRadius.circular(8),
+                  color: isActive ? AppColors.purpleDim : AppColors.surface,
+                  borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
                   border: Border.all(
-                    color: isActive ? AppColors.purple : AppColors.border,
+                    color: isActive ? AppColors.purple.withAlpha(80) : Colors.transparent,
+                    width: 1.5,
                   ),
                 ),
                 alignment: Alignment.center,
                 child: Text(
                   _label(p),
-                  style: TextStyle(
-                    color: isActive ? AppColors.purple : AppColors.textMuted,
-                    fontSize: 12,
-                    fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                  style: AppTheme.uiFont(
+                    fontSize: 13,
+                    color: isActive ? AppColors.purpleLight : AppColors.textMuted,
+                    fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
                   ),
                 ),
               ),
@@ -249,12 +290,20 @@ class _ModelPickerSheet extends StatelessWidget {
   Widget _buildModelTile(_ModelDef model) {
     final isActive = model.id == activeModel;
     return InkWell(
-      onTap: () => onModelSwitch(model.id),
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onModelSwitch(model.id);
+      },
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.xl,
+          vertical: AppSpacing.lg,
+        ),
         decoration: BoxDecoration(
-          color: isActive ? AppColors.purple.withAlpha(15) : null,
-          border: const Border(bottom: BorderSide(color: AppColors.border, width: 0.5)),
+          color: isActive ? AppColors.purpleDim.withAlpha(60) : null,
+          border: Border(
+            bottom: BorderSide(color: AppColors.border.withAlpha(80), width: 0.5),
+          ),
         ),
         child: Row(
           children: [
@@ -264,31 +313,33 @@ class _ModelPickerSheet extends StatelessWidget {
                 children: [
                   Text(
                     model.label,
-                    style: TextStyle(
-                      color: isActive ? AppColors.purple : AppColors.textPrimary,
-                      fontSize: 14,
-                      fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                    style: AppTheme.uiFont(
+                      fontSize: 15,
+                      color: isActive ? AppColors.purpleLight : AppColors.textPrimary,
+                      fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
                     ),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     model.description,
-                    style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+                    style: AppTheme.uiFont(
+                      fontSize: 12,
+                      color: AppColors.textMuted,
+                    ),
                   ),
                 ],
               ),
             ),
             Text(
               model.id,
-              style: TextStyle(
-                color: isActive ? AppColors.purple.withAlpha(150) : AppColors.textMuted,
+              style: AppTheme.codeFont(
                 fontSize: 10,
-                fontFamily: 'JetBrainsMono',
+                color: isActive ? AppColors.purple.withAlpha(150) : AppColors.textDisabled,
               ),
             ),
             if (isActive) ...[
-              const SizedBox(width: 8),
-              const Icon(Icons.check_circle, color: AppColors.purple, size: 16),
+              const SizedBox(width: AppSpacing.sm),
+              const Icon(Icons.check_circle, color: AppColors.purple, size: 18),
             ],
           ],
         ),

@@ -58,10 +58,10 @@ class _DiffViewerState extends State<DiffViewer>
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 4),
+      margin: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
       decoration: BoxDecoration(
         color: AppColors.panel,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
         border: Border.all(color: AppColors.border, width: 0.5),
       ),
       child: Column(
@@ -85,31 +85,30 @@ class _DiffViewerState extends State<DiffViewer>
     return GestureDetector(
       onTap: _toggle,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.sm),
         decoration: BoxDecoration(
           color: AppColors.surface,
           borderRadius: _expanded
-              ? const BorderRadius.vertical(top: Radius.circular(6))
-              : BorderRadius.circular(6),
+              ? const BorderRadius.vertical(top: Radius.circular(AppSpacing.radiusMd))
+              : BorderRadius.circular(AppSpacing.radiusMd),
         ),
         child: Row(
           children: [
             RotationTransition(
               turns: _iconController,
               child: const Icon(
-                Icons.expand_more,
+                Icons.expand_more_rounded,
                 size: 16,
                 color: AppColors.textMuted,
               ),
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: AppSpacing.sm),
             Icon(
               _fileIcon(widget.diff.path),
               size: 14,
               color: AppColors.textMuted,
             ),
-            const SizedBox(width: 6),
-            // Directory in muted, filename in primary
+            const SizedBox(width: AppSpacing.sm),
             Expanded(
               child: GestureDetector(
                 onTap: () => widget.onFileTap?.call(widget.diff.path),
@@ -118,45 +117,23 @@ class _DiffViewerState extends State<DiffViewer>
                     if (dirPath.isNotEmpty)
                       TextSpan(
                         text: dirPath,
-                        style: const TextStyle(
-                          color: AppColors.textMuted,
-                          fontSize: 12,
-                          fontFamily: 'JetBrainsMono',
-                        ),
+                        style: AppTheme.codeFont(fontSize: 12, color: AppColors.textMuted),
                       ),
                     TextSpan(
                       text: filename,
-                      style: const TextStyle(
-                        color: AppColors.textPrimary,
-                        fontSize: 12,
-                        fontFamily: 'JetBrainsMono',
-                      ),
+                      style: AppTheme.codeFont(fontSize: 12, color: AppColors.textPrimary),
                     ),
                   ]),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: AppSpacing.sm),
             if (adds > 0)
-              Text(
-                '+$adds',
-                style: const TextStyle(
-                  color: AppColors.green,
-                  fontSize: 11,
-                  fontFamily: 'JetBrainsMono',
-                ),
-              ),
-            if (adds > 0 && dels > 0) const SizedBox(width: 6),
+              Text('+$adds', style: AppTheme.codeFont(fontSize: 11, color: AppColors.green)),
+            if (adds > 0 && dels > 0) const SizedBox(width: AppSpacing.sm),
             if (dels > 0)
-              Text(
-                '-$dels',
-                style: const TextStyle(
-                  color: AppColors.red,
-                  fontSize: 11,
-                  fontFamily: 'JetBrainsMono',
-                ),
-              ),
+              Text('-$dels', style: AppTheme.codeFont(fontSize: 11, color: AppColors.red)),
           ],
         ),
       ),
@@ -179,15 +156,11 @@ class _DiffViewerState extends State<DiffViewer>
     final header =
         '@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@';
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      color: AppColors.purple.withValues(alpha: 0.08),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.xs),
+      color: AppColors.purpleDim.withAlpha(30),
       child: Text(
         header,
-        style: TextStyle(
-          color: AppColors.purple.withValues(alpha: 0.7),
-          fontSize: 11,
-          fontFamily: 'JetBrainsMono',
-        ),
+        style: AppTheme.codeFont(fontSize: 11, color: AppColors.purple.withAlpha(180)),
       ),
     );
   }
@@ -244,11 +217,9 @@ class _DiffViewerState extends State<DiffViewer>
 
     return Container(
       color: bgColor,
-      padding: const EdgeInsets.symmetric(horizontal: 0),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Old line number
           SizedBox(
             width: 36,
             child: Padding(
@@ -256,15 +227,10 @@ class _DiffViewerState extends State<DiffViewer>
               child: Text(
                 leftNum,
                 textAlign: TextAlign.right,
-                style: TextStyle(
-                  color: AppColors.textMuted.withValues(alpha: 0.5),
-                  fontSize: 11,
-                  fontFamily: 'JetBrainsMono',
-                ),
+                style: AppTheme.codeFont(fontSize: 11, color: AppColors.textDisabled),
               ),
             ),
           ),
-          // New line number
           SizedBox(
             width: 36,
             child: Padding(
@@ -272,37 +238,25 @@ class _DiffViewerState extends State<DiffViewer>
               child: Text(
                 rightNum,
                 textAlign: TextAlign.right,
-                style: TextStyle(
-                  color: AppColors.textMuted.withValues(alpha: 0.5),
-                  fontSize: 11,
-                  fontFamily: 'JetBrainsMono',
-                ),
+                style: AppTheme.codeFont(fontSize: 11, color: AppColors.textDisabled),
               ),
             ),
           ),
-          // Prefix (+/-/space)
           SizedBox(
             width: 14,
             child: Text(
               prefix,
-              style: TextStyle(
-                color: textColor,
-                fontSize: 12,
-                fontFamily: 'JetBrainsMono',
-                fontWeight: FontWeight.bold,
-              ),
+              style: AppTheme.codeFont(fontSize: 12, color: textColor, fontWeight: FontWeight.bold),
             ),
           ),
-          // Content
           Expanded(
             child: Text(
               line.content,
-              style: TextStyle(
+              style: AppTheme.codeFont(
+                fontSize: 12,
                 color: line.type == DiffLineType.context
                     ? AppColors.textPrimary
                     : textColor,
-                fontSize: 12,
-                fontFamily: 'JetBrainsMono',
               ),
               softWrap: true,
             ),
@@ -349,11 +303,11 @@ class MultiDiffViewer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (diffs.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.all(12),
+      return Padding(
+        padding: const EdgeInsets.all(AppSpacing.md),
         child: Text(
           'No changes',
-          style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+          style: AppTheme.uiFont(fontSize: 12, color: AppColors.textMuted),
         ),
       );
     }
@@ -364,39 +318,20 @@ class MultiDiffViewer extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Summary bar
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs, vertical: AppSpacing.xs),
           child: Row(
             children: [
               Text(
                 '${diffs.length} file${diffs.length == 1 ? '' : 's'} changed',
-                style: const TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 11,
-                  fontFamily: 'JetBrainsMono',
-                ),
+                style: AppTheme.codeFont(fontSize: 11, color: AppColors.textMuted),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: AppSpacing.sm),
               if (totalAdds > 0)
-                Text(
-                  '+$totalAdds',
-                  style: const TextStyle(
-                    color: AppColors.green,
-                    fontSize: 11,
-                    fontFamily: 'JetBrainsMono',
-                  ),
-                ),
-              if (totalAdds > 0 && totalDels > 0) const SizedBox(width: 6),
+                Text('+$totalAdds', style: AppTheme.codeFont(fontSize: 11, color: AppColors.green)),
+              if (totalAdds > 0 && totalDels > 0) const SizedBox(width: AppSpacing.sm),
               if (totalDels > 0)
-                Text(
-                  '-$totalDels',
-                  style: const TextStyle(
-                    color: AppColors.red,
-                    fontSize: 11,
-                    fontFamily: 'JetBrainsMono',
-                  ),
-                ),
+                Text('-$totalDels', style: AppTheme.codeFont(fontSize: 11, color: AppColors.red)),
             ],
           ),
         ),

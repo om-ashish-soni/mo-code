@@ -1,19 +1,47 @@
 # Mo-Code Checkpoint
 
 ## Last updated
-2026-04-13 by Claude (C3, Round 5 beta testing complete)
+2026-04-13 by Claude (C2, FEAT-002 proot+Alpine Flutter/Android + Play Store deployment)
 
 ## Handoff note
-Round 5 beta testing COMPLETE. All flows tested on Linux desktop, bugs found and fixed. App is functional end-to-end.
+FEAT-002 proot+Alpine runtime: COMPLETE (C1 backend + C2 Flutter/Android). Full proot + Alpine Linux on-device execution environment. Shell commands route through proot when available. Auto-detection of project types, auto-install of tools via apk.
 
-Architecture: Custom Go daemon with agent engine, 6 providers (Claude, Gemini, Copilot, OpenRouter, Ollama, Azure). Flutter app with 5 screens (Agent, Files, Tasks, Config, Sessions). Localhost HTTP + WebSocket. Android foreground service keeps daemon alive when backgrounded. All providers have retry with exponential backoff, HTTP timeouts, and connection pooling. WebSocket auto-reconnects on disconnect.
+Architecture: Custom Go daemon with agent engine, 6 providers (Claude, Gemini, Copilot, OpenRouter, Ollama, Azure). Flutter app with 5 screens (Agent, Files, Tasks, Config, Sessions). Localhost HTTP + WebSocket. Android foreground service keeps daemon alive when backgrounded. All providers have retry with exponential backoff, HTTP timeouts, and connection pooling. WebSocket auto-reconnects on disconnect. proot + Alpine Linux runtime for on-device code execution.
 
-**Play Store release:** Version 1.1.0+2, SDK 35, `./scripts/release.sh` ready. Blocked on Om: keystore generation, key.properties, run `./scripts/release.sh`, Play Console upload.
+**Play Store release:** Version 1.1.0+2, compileSdk 36. Release AAB builds successfully (44.3MB). `./scripts/release.sh` works. Keystore + key.properties configured. ISSUE-009 (Java toolchain) RESOLVED. See `docs/PLAY_STORE_DEPLOYMENT.md` for full deployment guide.
 
-**Build status:** `flutter analyze` clean. `go build ./...`, `go test ./...`, `go vet ./...` all clean.
+**Build status:** `flutter analyze` clean (1 info-level lint). `go build ./...`, `go test ./...`, `go vet ./...` all clean.
 
 ## Current phase
-Round 5 COMPLETE — beta tested, all flows working.
+Ready for Play Store upload. All features complete, all tests passing.
+
+## FEAT-002: proot + Alpine Runtime — IN PROGRESS
+### C1 (Backend Go) — COMPLETE
+- [x] `backend/runtime/proot.go` — ProotRuntime struct, Exec(), InstallPackages(), IsReady(), RootFSSize()
+- [x] `backend/runtime/detect.go` — DetectProject() with 12 marker rules, AllPackages() dedup
+- [x] `backend/tools/shell.go` — NewShellExecWithProot(), platform-aware routing, execDirect() helper
+- [x] `backend/tools/tools.go` — DispatcherOpts, DefaultDispatcherWithOpts() with proot support
+- [x] `backend/api/messages.go` — TypeRuntimeSetup, TypeRuntimeReady, payload structs
+- [x] `backend/agent/engine.go` — Engine stores proot, passes to dispatcher
+- [x] `backend/cmd/mocode/main.go` — MOCODE_PROOT_ROOT env var, auto-init proot runtime
+- [x] `backend/runtime/proot_test.go` + `detect_test.go` — 16 tests, all passing
+- [x] `go build ./...`, `go test ./...`, `go vet ./...` — all clean
+
+### C2 (Flutter + Android) — COMPLETE
+- [x] Bundle proot v5.3.0 ARM64 static binary (1.5MB) + Alpine 3.21.3 rootfs (3.7MB) in APK assets
+- [x] `scripts/download-runtime.sh` — downloads + verifies proot + Alpine with SHA256 checksums
+- [x] `RuntimeBootstrap.kt` — first-launch extraction with SHA256 verification, progress callbacks, version-based skip, Java tar fallback
+- [x] `DaemonService.kt` — calls RuntimeBootstrap before daemon start, passes MOCODE_PROOT_BIN/ROOTFS/PROJECTS env vars
+- [x] `DaemonBridge.kt` — added getRuntimeStatus() + resetRuntime() platform channel methods
+- [x] `daemon.dart` — added getRuntimeStatus(), resetRuntime(), fetchRuntimeStatus() API methods
+- [x] `main.go` — reads MOCODE_PROOT_BIN/ROOTFS/PROJECTS env vars, inits ProotRuntime, passes to server
+- [x] `server.go` — GET /api/runtime/status endpoint, SetProot() method
+- [x] `config_screen.dart` — Runtime Environment section with status, size, reset button + confirmation dialog
+- [x] `agent_screen.dart` — bootstrap progress polling (progress bar + percentage during first launch extraction)
+- [x] `.gitignore` — added *.aab, *.apk, .kotlin/, .gradle/, **/.cxx/, runtime binary assets
+- [x] `scripts/release.sh` — improved with --quick flag, javac check, keystore path fix documentation
+- [x] `docs/PLAY_STORE_DEPLOYMENT.md` — full deployment guide (setup, build, upload, version bumping, data safety, troubleshooting)
+- [x] Release AAB builds successfully (44.3MB)
 
 ## Redesign Round 1 — COMPLETE (2026-04-13)
 - [x] E6: Structured tool results — `Result{Title, Metadata, Output}` across all 16 tools (C1)

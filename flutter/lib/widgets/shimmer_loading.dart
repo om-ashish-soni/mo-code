@@ -55,7 +55,7 @@ class ShimmerLine extends StatelessWidget {
       height: height,
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
       ),
     );
   }
@@ -68,7 +68,7 @@ class SkeletonListTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.md),
       child: Row(
         children: [
           Container(
@@ -76,16 +76,16 @@ class SkeletonListTile extends StatelessWidget {
             height: 40,
             decoration: BoxDecoration(
               color: AppColors.surface,
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: AppSpacing.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 ShimmerLine(width: MediaQuery.of(context).size.width * 0.5),
-                const SizedBox(height: 8),
+                const SizedBox(height: AppSpacing.sm),
                 ShimmerLine(width: MediaQuery.of(context).size.width * 0.3, height: 10),
               ],
             ),
@@ -103,22 +103,22 @@ class SkeletonCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.xs),
+      padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
         color: AppColors.panel,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(color: AppColors.border, width: 0.5),
       ),
       child: const Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           ShimmerLine(height: 14),
-          SizedBox(height: 12),
+          SizedBox(height: AppSpacing.md),
           Row(
             children: [
               ShimmerLine(width: 60, height: 10),
-              SizedBox(width: 16),
+              SizedBox(width: AppSpacing.lg),
               ShimmerLine(width: 40, height: 10),
               Spacer(),
               ShimmerLine(width: 50, height: 10),

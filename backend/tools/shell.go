@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"mo-code/backend/runtime"
 )
 
 const (
@@ -21,12 +23,21 @@ const (
 )
 
 // ShellExec executes shell commands within the working directory.
+// When a ProotRuntime is configured, commands are routed through proot + Alpine.
+// When nil, commands execute directly on the host OS.
 type ShellExec struct {
 	workDir string
+	proot   *runtime.ProotRuntime
 }
 
+// NewShellExec creates a ShellExec with direct host execution.
 func NewShellExec(workDir string) *ShellExec {
 	return &ShellExec{workDir: workDir}
+}
+
+// NewShellExecWithProot creates a ShellExec that routes commands through proot.
+func NewShellExecWithProot(workDir string, proot *runtime.ProotRuntime) *ShellExec {
+	return &ShellExec{workDir: workDir, proot: proot}
 }
 
 func (s *ShellExec) Name() string { return "shell_exec" }
@@ -95,8 +106,6 @@ func (s *ShellExec) Execute(ctx context.Context, argsJSON string) Result {
 	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, "sh", "-c", args.Command)
-
 	// Resolve working directory — support relative paths.
 	workDir := s.workDir
 	if args.WorkingDir != "" {
@@ -108,27 +117,31 @@ func (s *ShellExec) Execute(ctx context.Context, argsJSON string) Result {
 			}
 		}
 	}
-	cmd.Dir = workDir
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	var stdoutStr, stderrStr string
+	var exitCode int
+	var runErr error
 
-	err := cmd.Run()
+	if s.proot != nil {
+		// Route through proot + Alpine.
+		stdoutStr, stderrStr, exitCode, runErr = s.proot.Exec(cmdCtx, args.Command, workDir)
+	} else {
+		// Direct host execution.
+		stdoutStr, stderrStr, exitCode, runErr = s.execDirect(cmdCtx, args.Command, workDir)
+	}
 
 	var sb strings.Builder
-	exitCode := 0
 
-	if stdout.Len() > 0 {
-		out := stdout.String()
+	if stdoutStr != "" {
+		out := stdoutStr
 		if len(out) > shellMaxOutput {
 			out = out[:shellMaxOutput] + "\n... (output truncated)"
 		}
 		sb.WriteString(out)
 	}
 
-	if stderr.Len() > 0 {
-		errOut := stderr.String()
+	if stderrStr != "" {
+		errOut := stderrStr
 		if len(errOut) > shellMaxOutput {
 			errOut = errOut[:shellMaxOutput] + "\n... (stderr truncated)"
 		}
@@ -139,19 +152,21 @@ func (s *ShellExec) Execute(ctx context.Context, argsJSON string) Result {
 	}
 
 	var errMsg string
-	if err != nil {
+	if runErr != nil {
 		if cmdCtx.Err() == context.DeadlineExceeded {
 			sb.WriteString(fmt.Sprintf("\n(command timed out after %s)", timeout))
 			errMsg = "timeout"
 		}
-		exitCode = -1
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
+		if exitCode == 0 {
+			exitCode = -1
 		}
 		sb.WriteString(fmt.Sprintf("\n(exit code: %d)", exitCode))
 		if errMsg == "" {
 			errMsg = fmt.Sprintf("exit code %d", exitCode)
 		}
+	} else if exitCode != 0 {
+		sb.WriteString(fmt.Sprintf("\n(exit code: %d)", exitCode))
+		errMsg = fmt.Sprintf("exit code %d", exitCode)
 	}
 
 	output := sb.String()
@@ -161,7 +176,6 @@ func (s *ShellExec) Execute(ctx context.Context, argsJSON string) Result {
 
 	title := args.Description
 	if title == "" {
-		// Use first 60 chars of command as title.
 		title = args.Command
 		if len(title) > 60 {
 			title = title[:60] + "..."
@@ -175,8 +189,41 @@ func (s *ShellExec) Execute(ctx context.Context, argsJSON string) Result {
 		Metadata: map[string]any{
 			"command":   args.Command,
 			"exit_code": exitCode,
+			"runtime":   s.runtimeLabel(),
 		},
 	}
+}
+
+// execDirect runs a command directly on the host OS.
+func (s *ShellExec) execDirect(ctx context.Context, command, workDir string) (stdout, stderr string, exitCode int, err error) {
+	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	cmd.Dir = workDir
+
+	var outBuf, errBuf bytes.Buffer
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+
+	runErr := cmd.Run()
+	exitCode = 0
+
+	if runErr != nil {
+		if exitErr, ok := runErr.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = -1
+			err = runErr
+		}
+	}
+
+	return outBuf.String(), errBuf.String(), exitCode, err
+}
+
+// runtimeLabel returns "proot" or "host" for metadata.
+func (s *ShellExec) runtimeLabel() string {
+	if s.proot != nil {
+		return "proot"
+	}
+	return "host"
 }
 
 // isDangerous returns true for commands that should never be run by an agent.

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../api/daemon.dart';
 import '../theme/colors.dart';
@@ -91,19 +92,20 @@ class _SessionsScreenState extends State<SessionsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.panel,
-        title: const Text('Delete Session', style: TextStyle(color: AppColors.white)),
-        content: const Text(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppSpacing.radiusLg)),
+        title: Text('Delete Session', style: AppTheme.uiFont(fontSize: 18, color: AppColors.white, fontWeight: FontWeight.w600)),
+        content: Text(
           'This will permanently delete this session and its conversation history.',
-          style: TextStyle(color: AppColors.textMuted),
+          style: AppTheme.uiFont(fontSize: 14, color: AppColors.textMuted),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel', style: TextStyle(color: AppColors.textMuted)),
+            child: Text('Cancel', style: AppTheme.uiFont(fontSize: 14, color: AppColors.textMuted)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete', style: TextStyle(color: AppColors.red)),
+            child: Text('Delete', style: AppTheme.uiFont(fontSize: 14, color: AppColors.red, fontWeight: FontWeight.w600)),
           ),
         ],
       ),
@@ -130,17 +132,18 @@ class _SessionsScreenState extends State<SessionsScreen> {
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.panel,
+        elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: AppColors.textMuted),
+          icon: const Icon(Icons.arrow_back_rounded, color: AppColors.textMuted),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text(
+        title: Text(
           'Sessions',
-          style: TextStyle(color: AppColors.white, fontSize: 18),
+          style: AppTheme.uiFont(fontSize: 18, color: AppColors.white, fontWeight: FontWeight.w600),
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh, color: AppColors.textMuted),
+            icon: const Icon(Icons.refresh_rounded, color: AppColors.textMuted),
             onPressed: _loadSessions,
             tooltip: 'Refresh',
           ),
@@ -161,31 +164,47 @@ class _SessionsScreenState extends State<SessionsScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.error_outline, color: AppColors.red, size: 48),
-          const SizedBox(height: 12),
-          Text(_error!, style: const TextStyle(color: AppColors.textMuted)),
-          const SizedBox(height: 12),
-          TextButton(onPressed: _loadSessions, child: const Text('Retry')),
+          Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              color: AppColors.redDim,
+              borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+            ),
+            child: const Icon(Icons.error_outline_rounded, color: AppColors.red, size: 32),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          Text(_error!, style: AppTheme.uiFont(fontSize: 14, color: AppColors.textMuted)),
+          const SizedBox(height: AppSpacing.md),
+          TextButton(onPressed: _loadSessions, child: Text('Retry', style: AppTheme.uiFont(fontSize: 14, color: AppColors.purple, fontWeight: FontWeight.w600))),
         ],
       ),
     );
   }
 
   Widget _buildEmptyState() {
-    return const Center(
+    return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.history, color: AppColors.textMuted, size: 48),
-          SizedBox(height: 12),
+          Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+            ),
+            child: const Icon(Icons.history_rounded, color: AppColors.textMuted, size: 32),
+          ),
+          const SizedBox(height: AppSpacing.lg),
           Text(
             'No sessions yet',
-            style: TextStyle(color: AppColors.textMuted, fontSize: 16),
+            style: AppTheme.uiFont(fontSize: 16, color: AppColors.textSecondary, fontWeight: FontWeight.w500),
           ),
-          SizedBox(height: 6),
+          const SizedBox(height: AppSpacing.sm),
           Text(
             'Start a conversation in the Agent tab',
-            style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+            style: AppTheme.uiFont(fontSize: 12, color: AppColors.textMuted),
           ),
         ],
       ),
@@ -194,7 +213,7 @@ class _SessionsScreenState extends State<SessionsScreen> {
 
   Widget _buildSessionList() {
     return ListView.builder(
-      padding: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.only(top: AppSpacing.sm),
       itemCount: _sessions.length,
       itemBuilder: (context, index) {
         final session = _sessions[index];
@@ -247,26 +266,31 @@ class _SessionCard extends StatelessWidget {
     final updatedAt = session['updated_at'] as String?;
 
     return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      margin: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.xs),
       color: AppColors.panel,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        side: const BorderSide(color: AppColors.border, width: 0.5),
+      ),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
         child: Padding(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(AppSpacing.lg),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
                   _stateIcon(state),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: AppSpacing.md),
                   Expanded(
                     child: Text(
                       title,
-                      style: const TextStyle(
-                        color: AppColors.textPrimary,
+                      style: AppTheme.uiFont(
                         fontSize: 14,
+                        color: AppColors.textPrimary,
                         fontWeight: FontWeight.w500,
                       ),
                       maxLines: 2,
@@ -274,30 +298,32 @@ class _SessionCard extends StatelessWidget {
                     ),
                   ),
                   PopupMenuButton<String>(
-                    icon: const Icon(Icons.more_vert, color: AppColors.textMuted, size: 18),
+                    icon: const Icon(Icons.more_vert_rounded, color: AppColors.textMuted, size: 18),
                     color: AppColors.panel,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppSpacing.radiusMd)),
                     onSelected: (value) {
+                      HapticFeedback.selectionClick();
                       if (value == 'resume') onResume();
                       if (value == 'delete') onDelete();
                     },
                     itemBuilder: (_) => [
-                      const PopupMenuItem(
+                      PopupMenuItem(
                         value: 'resume',
                         child: Row(
                           children: [
-                            Icon(Icons.play_arrow, color: AppColors.green, size: 18),
-                            SizedBox(width: 8),
-                            Text('Resume', style: TextStyle(color: AppColors.textPrimary)),
+                            const Icon(Icons.play_arrow_rounded, color: AppColors.green, size: 18),
+                            const SizedBox(width: AppSpacing.sm),
+                            Text('Resume', style: AppTheme.uiFont(fontSize: 14, color: AppColors.textPrimary)),
                           ],
                         ),
                       ),
-                      const PopupMenuItem(
+                      PopupMenuItem(
                         value: 'delete',
                         child: Row(
                           children: [
-                            Icon(Icons.delete_outline, color: AppColors.red, size: 18),
-                            SizedBox(width: 8),
-                            Text('Delete', style: TextStyle(color: AppColors.red)),
+                            const Icon(Icons.delete_outline_rounded, color: AppColors.red, size: 18),
+                            const SizedBox(width: AppSpacing.sm),
+                            Text('Delete', style: AppTheme.uiFont(fontSize: 14, color: AppColors.red)),
                           ],
                         ),
                       ),
@@ -305,22 +331,22 @@ class _SessionCard extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: AppSpacing.sm),
               Row(
                 children: [
                   _providerBadge(provider),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: AppSpacing.sm),
                   _stateBadge(state),
                   const Spacer(),
                   Text(
                     '$messageCount msgs',
-                    style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+                    style: AppTheme.uiFont(fontSize: 11, color: AppColors.textMuted),
                   ),
                   if (updatedAt != null) ...[
-                    const Text(' \u00b7 ', style: TextStyle(color: AppColors.textMuted, fontSize: 11)),
+                    Text(' \u00b7 ', style: AppTheme.uiFont(fontSize: 11, color: AppColors.textMuted)),
                     Text(
                       _formatTime(updatedAt),
-                      style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+                      style: AppTheme.uiFont(fontSize: 11, color: AppColors.textMuted),
                     ),
                   ],
                 ],
@@ -346,14 +372,14 @@ class _SessionCard extends StatelessWidget {
   Widget _providerBadge(String provider) {
     if (provider.isEmpty) return const SizedBox.shrink();
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 2),
       decoration: BoxDecoration(
-        color: AppColors.purple.withAlpha(30),
-        borderRadius: BorderRadius.circular(4),
+        color: AppColors.purpleDim.withAlpha(60),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
       ),
       child: Text(
         provider,
-        style: const TextStyle(color: AppColors.purple, fontSize: 10, fontWeight: FontWeight.w500),
+        style: AppTheme.uiFont(fontSize: 10, color: AppColors.purpleLight, fontWeight: FontWeight.w500),
       ),
     );
   }
@@ -367,14 +393,14 @@ class _SessionCard extends StatelessWidget {
       _ => (state, AppColors.textMuted),
     };
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 2),
       decoration: BoxDecoration(
-        color: color.withAlpha(30),
-        borderRadius: BorderRadius.circular(4),
+        color: color.withAlpha(15),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
       ),
       child: Text(
         label,
-        style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w500),
+        style: AppTheme.uiFont(fontSize: 10, color: color, fontWeight: FontWeight.w500),
       ),
     );
   }
@@ -467,19 +493,20 @@ class _SessionDetailScreenState extends State<SessionDetailScreen> {
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.panel,
+        elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: AppColors.textMuted),
+          icon: const Icon(Icons.arrow_back_rounded, color: AppColors.textMuted),
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
           title,
-          style: const TextStyle(color: AppColors.white, fontSize: 16),
+          style: AppTheme.uiFont(fontSize: 16, color: AppColors.white, fontWeight: FontWeight.w600),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.play_arrow, color: AppColors.green),
+            icon: const Icon(Icons.play_arrow_rounded, color: AppColors.green),
             onPressed: () => _showResumeDialog(),
             tooltip: 'Resume session',
           ),
@@ -494,13 +521,13 @@ class _SessionDetailScreenState extends State<SessionDetailScreen> {
   Widget _buildConversation() {
     final messages = _fullSession?['messages'] as List? ?? [];
     if (messages.isEmpty) {
-      return const Center(
-        child: Text('No messages in this session', style: TextStyle(color: AppColors.textMuted)),
+      return Center(
+        child: Text('No messages in this session', style: AppTheme.uiFont(fontSize: 14, color: AppColors.textMuted)),
       );
     }
 
     return ListView.builder(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(AppSpacing.md),
       itemCount: messages.length,
       itemBuilder: (context, index) {
         final msg = messages[index] as Map<String, dynamic>;
@@ -515,28 +542,34 @@ class _SessionDetailScreenState extends State<SessionDetailScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.panel,
-        title: const Text('Resume Session', style: TextStyle(color: AppColors.white)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppSpacing.radiusLg)),
+        title: Text('Resume Session', style: AppTheme.uiFont(fontSize: 18, color: AppColors.white, fontWeight: FontWeight.w600)),
         content: TextField(
           controller: controller,
-          style: const TextStyle(color: AppColors.textPrimary),
+          style: AppTheme.uiFont(fontSize: 14, color: AppColors.textPrimary),
           maxLines: 3,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             hintText: 'Continue with a new prompt...',
+            hintStyle: AppTheme.uiFont(fontSize: 14, color: AppColors.textDisabled),
             filled: true,
-            fillColor: AppColors.background,
+            fillColor: AppColors.surface,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+              borderSide: BorderSide.none,
+            ),
           ),
           autofocus: true,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel', style: TextStyle(color: AppColors.textMuted)),
+            child: Text('Cancel', style: AppTheme.uiFont(fontSize: 14, color: AppColors.textMuted)),
           ),
           ElevatedButton(
             onPressed: () {
               final prompt = controller.text.trim();
               if (prompt.isNotEmpty) {
-                Navigator.pop(ctx); // close dialog
+                Navigator.pop(ctx);
                 Navigator.pop(context, {
                   'action': 'resume',
                   'session_id': widget.session['id'],
@@ -567,22 +600,24 @@ class _MessageBubble extends StatelessWidget {
     final isAssistant = role == 'assistant';
     final isTool = role == 'tool';
 
+    final roleColor = isUser ? AppColors.green : isAssistant ? AppColors.purple : AppColors.amber;
+
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+      padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
         color: isUser
-            ? AppColors.green.withAlpha(15)
+            ? AppColors.green.withAlpha(8)
             : isTool
-                ? AppColors.amber.withAlpha(15)
+                ? AppColors.amber.withAlpha(8)
                 : AppColors.surface,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
         border: Border.all(
           color: isUser
-              ? AppColors.green.withAlpha(40)
+              ? AppColors.green.withAlpha(25)
               : isTool
-                  ? AppColors.amber.withAlpha(40)
-                  : AppColors.border,
+                  ? AppColors.amber.withAlpha(25)
+                  : AppColors.border.withAlpha(80),
         ),
       ),
       child: Column(
@@ -590,46 +625,52 @@ class _MessageBubble extends StatelessWidget {
         children: [
           Row(
             children: [
-              Text(
-                _roleLabel(role),
-                style: TextStyle(
-                  color: isUser ? AppColors.green : isAssistant ? AppColors.purple : AppColors.amber,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
+              Container(
+                width: 20,
+                height: 20,
+                decoration: BoxDecoration(
+                  color: roleColor.withAlpha(20),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Icon(
+                  isUser ? Icons.person : isAssistant ? Icons.smart_toy_outlined : Icons.build_outlined,
+                  size: 12,
+                  color: roleColor,
                 ),
               ),
+              const SizedBox(width: AppSpacing.sm),
+              Text(
+                _roleLabel(role),
+                style: AppTheme.uiFont(fontSize: 11, color: roleColor, fontWeight: FontWeight.w600),
+              ),
               if (isTool) ...[
-                const SizedBox(width: 6),
+                const SizedBox(width: AppSpacing.sm),
                 Text(
                   message['tool_call_id'] as String? ?? '',
-                  style: const TextStyle(color: AppColors.textMuted, fontSize: 9),
+                  style: AppTheme.codeFont(fontSize: 9, color: AppColors.textDisabled),
                 ),
               ],
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: AppSpacing.sm),
           if (content.isNotEmpty)
             SelectableText(
               content.length > 500 ? '${content.substring(0, 500)}...' : content,
-              style: const TextStyle(
-                color: AppColors.textPrimary,
-                fontSize: 12,
-                fontFamily: 'monospace',
-              ),
+              style: AppTheme.codeFont(fontSize: 12, color: AppColors.textPrimary),
             ),
           if (toolCalls != null && toolCalls.isNotEmpty) ...[
-            const SizedBox(height: 6),
+            const SizedBox(height: AppSpacing.sm),
             for (final tc in toolCalls)
               Container(
-                margin: const EdgeInsets.only(top: 4),
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                margin: const EdgeInsets.only(top: AppSpacing.xs),
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
                 decoration: BoxDecoration(
-                  color: AppColors.purple.withAlpha(20),
-                  borderRadius: BorderRadius.circular(4),
+                  color: AppColors.purple.withAlpha(10),
+                  borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
                 ),
                 child: Text(
                   'tool: ${(tc as Map)['name'] ?? 'unknown'}',
-                  style: const TextStyle(color: AppColors.purple, fontSize: 11),
+                  style: AppTheme.codeFont(fontSize: 11, color: AppColors.purple),
                 ),
               ),
           ],
@@ -640,10 +681,10 @@ class _MessageBubble extends StatelessWidget {
 
   String _roleLabel(String role) {
     return switch (role) {
-      'user' => '\$ user',
-      'assistant' => '> assistant',
-      'tool' => '~ tool result',
-      'system' => '# system',
+      'user' => 'user',
+      'assistant' => 'assistant',
+      'tool' => 'tool result',
+      'system' => 'system',
       _ => role,
     };
   }

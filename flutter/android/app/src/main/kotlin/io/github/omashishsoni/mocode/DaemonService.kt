@@ -66,6 +66,18 @@ class DaemonService : Service() {
 
         Thread {
             try {
+                // Bootstrap proot + Alpine rootfs (first launch extracts from assets).
+                updateNotification("Setting up runtime...")
+                val bootstrap = RuntimeBootstrap(this)
+                val runtimePaths = bootstrap.bootstrap { msg, pct ->
+                    if (pct in 0..100) {
+                        updateNotification(msg)
+                    }
+                }
+                if (runtimePaths == null) {
+                    Log.w(TAG, "Runtime bootstrap failed — daemon will run without proot")
+                }
+
                 val binary = extractBinary()
                 if (binary == null) {
                     Log.e(TAG, "Failed to extract daemon binary")
@@ -74,7 +86,7 @@ class DaemonService : Service() {
                     return@Thread
                 }
 
-                startDaemonProcess(binary)
+                startDaemonProcess(binary, runtimePaths)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start daemon", e)
                 updateNotification("Daemon failed: ${e.message}")
@@ -141,17 +153,25 @@ class DaemonService : Service() {
     /**
      * Spawn the Go daemon process and start the monitor thread.
      */
-    private fun startDaemonProcess(binary: File) {
+    private fun startDaemonProcess(binary: File, runtimePaths: RuntimeBootstrap.RuntimePaths? = null) {
         val portFile = File(filesDir, "daemon_port")
         val dataDir = filesDir.absolutePath
 
         val workDir: String = getExternalFilesDir(null)?.absolutePath ?: dataDir
-        val env = mapOf(
+        val env = mutableMapOf(
             "MOCODE_PORT_FILE" to portFile.absolutePath,
             "MOCODE_WORKDIR" to workDir,
             "HOME" to dataDir,
             "TMPDIR" to cacheDir.absolutePath,
         )
+
+        // Pass proot runtime paths if bootstrap succeeded.
+        if (runtimePaths != null) {
+            env["MOCODE_PROOT_BIN"] = runtimePaths.prootBin
+            env["MOCODE_PROOT_ROOTFS"] = runtimePaths.rootFS
+            env["MOCODE_PROOT_PROJECTS"] = runtimePaths.projectsDir
+            Log.i(TAG, "proot enabled: bin=${runtimePaths.prootBin} rootfs=${runtimePaths.rootFS}")
+        }
 
         val pb = ProcessBuilder(binary.absolutePath)
         pb.directory(filesDir)
@@ -184,7 +204,7 @@ class DaemonService : Service() {
                     updateNotification("Daemon restarting...")
                     Thread.sleep(2000)
                     if (shouldRun) {
-                        startDaemonProcess(binary)
+                        startDaemonProcess(binary, runtimePaths)
                     }
                     return@Thread
                 } catch (_: InterruptedException) {

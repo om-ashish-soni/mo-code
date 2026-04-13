@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"mo-code/backend/provider"
+	"mo-code/backend/runtime"
 )
 
 // Tool is the interface every agent tool implements.
@@ -140,15 +141,36 @@ func (d *Dispatcher) Names() []string {
 	return names
 }
 
+// DispatcherOpts configures optional features for DefaultDispatcher.
+type DispatcherOpts struct {
+	Spawner SubagentSpawner
+	Proot   *runtime.ProotRuntime
+}
+
 // DefaultDispatcher creates a Dispatcher with all standard tools registered.
 // workingDir is the root directory for file and shell operations.
 // spawner is optional — if provided, the task (subagent) tool is registered.
 func DefaultDispatcher(workingDir string, spawner ...SubagentSpawner) *Dispatcher {
+	return DefaultDispatcherWithOpts(workingDir, DispatcherOpts{
+		Spawner: firstSpawner(spawner),
+	})
+}
+
+// DefaultDispatcherWithOpts creates a Dispatcher with all standard tools and
+// optional configuration (proot runtime, subagent spawner).
+func DefaultDispatcherWithOpts(workingDir string, opts DispatcherOpts) *Dispatcher {
 	d := NewDispatcher()
 	d.Register(NewFileRead(workingDir))
 	d.Register(NewFileWrite(workingDir))
 	d.Register(NewFileList(workingDir))
-	d.Register(NewShellExec(workingDir))
+
+	// Shell: route through proot when configured, direct exec otherwise.
+	if opts.Proot != nil {
+		d.Register(NewShellExecWithProot(workingDir, opts.Proot))
+	} else {
+		d.Register(NewShellExec(workingDir))
+	}
+
 	d.Register(NewGitStatus(workingDir))
 	d.Register(NewGitDiff(workingDir))
 	d.Register(NewGitLog(workingDir))
@@ -160,8 +182,15 @@ func DefaultDispatcher(workingDir string, spawner ...SubagentSpawner) *Dispatche
 	d.Register(NewFileEdit(workingDir))
 	d.Register(NewQuestion())
 	d.Register(NewWebFetch())
-	if len(spawner) > 0 && spawner[0] != nil {
-		d.Register(NewTaskTool(spawner[0]))
+	if opts.Spawner != nil {
+		d.Register(NewTaskTool(opts.Spawner))
 	}
 	return d
+}
+
+func firstSpawner(spawners []SubagentSpawner) SubagentSpawner {
+	if len(spawners) > 0 {
+		return spawners[0]
+	}
+	return nil
 }

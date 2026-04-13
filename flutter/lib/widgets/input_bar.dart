@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import '../theme/colors.dart';
 
 class InputBar extends StatefulWidget {
@@ -30,13 +31,12 @@ class _InputBarState extends State<InputBar> {
 
   // Command history
   final List<String> _history = [];
-  int _historyIndex = -1; // -1 means not browsing history
-  String _savedInput = ''; // saves current input when browsing history
+  int _historyIndex = -1;
+  String _savedInput = '';
 
   @override
   void initState() {
     super.initState();
-    // Auto-focus the text field on mount
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!widget.disabled) _textFieldFocus.requestFocus();
     });
@@ -53,12 +53,12 @@ class _InputBarState extends State<InputBar> {
   void _submit() {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
-    // Add to history (avoid duplicates at end)
     if (_history.isEmpty || _history.last != text) {
       _history.add(text);
     }
     _historyIndex = -1;
     _savedInput = '';
+    HapticFeedback.lightImpact();
     widget.onSubmit(text);
     _controller.clear();
     setState(() => _hasText = false);
@@ -78,7 +78,8 @@ class _InputBarState extends State<InputBar> {
         _historyIndex--;
       }
       _controller.text = _history[_historyIndex];
-      _controller.selection = TextSelection.collapsed(offset: _controller.text.length);
+      _controller.selection =
+          TextSelection.collapsed(offset: _controller.text.length);
       setState(() => _hasText = _controller.text.isNotEmpty);
       return KeyEventResult.handled;
     }
@@ -92,7 +93,8 @@ class _InputBarState extends State<InputBar> {
         _historyIndex = -1;
         _controller.text = _savedInput;
       }
-      _controller.selection = TextSelection.collapsed(offset: _controller.text.length);
+      _controller.selection =
+          TextSelection.collapsed(offset: _controller.text.length);
       setState(() => _hasText = _controller.text.isNotEmpty);
       return KeyEventResult.handled;
     }
@@ -103,87 +105,145 @@ class _InputBarState extends State<InputBar> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      constraints: const BoxConstraints(minHeight: 68),
-      decoration: const BoxDecoration(
-        color: AppColors.panel,
-        border: Border(top: BorderSide(color: AppColors.border)),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.lg,
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Expanded(
-            child: Focus(
-              focusNode: _focusNode,
-              onKeyEvent: _handleKeyEvent,
-              child: TextField(
-                controller: _controller,
-                focusNode: _textFieldFocus,
-                autofocus: true,
-                enabled: !widget.disabled,
-                maxLines: 1,
-                style: const TextStyle(color: AppColors.textPrimary, fontSize: 14, height: 1.5),
-                textInputAction: TextInputAction.send,
-                decoration: InputDecoration(
-                  hintText: widget.disabled ? 'Connecting...' : 'Type a prompt...',
-                  hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 14),
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                  isDense: false,
+      decoration: BoxDecoration(
+        color: AppColors.panel.withAlpha(240),
+        border: const Border(
+          top: BorderSide(color: AppColors.border, width: 0.5),
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            // Text field with rounded pill shape
+            Expanded(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
+                  border: Border.all(
+                    color: _textFieldFocus.hasFocus
+                        ? AppColors.purple.withAlpha(100)
+                        : AppColors.border,
+                    width: 1,
+                  ),
                 ),
-                onChanged: (value) {
-                  _historyIndex = -1; // reset history browsing on manual edit
-                  if (value.isEmpty != !_hasText) {
-                    setState(() => _hasText = value.isNotEmpty);
-                  }
-                },
-                onSubmitted: (_) {
-                  _submit();
-                  _textFieldFocus.requestFocus(); // keep focus after submit
-                },
-              ),
-            ),
-          ),
-          if (widget.showMic)
-            IconButton(
-              icon: const Icon(Icons.mic, color: AppColors.textMuted, size: 20),
-              onPressed: widget.disabled ? null : () {},
-            ),
-          if (widget.taskRunning && widget.onStop != null)
-            Container(
-              width: 28,
-              height: 28,
-              margin: const EdgeInsets.only(left: 8),
-              decoration: const BoxDecoration(
-                color: AppColors.red,
-                shape: BoxShape.circle,
-              ),
-              child: IconButton(
-                padding: EdgeInsets.zero,
-                icon: const Icon(Icons.stop, color: AppColors.white, size: 18),
-                onPressed: widget.onStop,
-              ),
-            )
-          else
-            Container(
-              width: 28,
-              height: 28,
-              margin: const EdgeInsets.only(left: 8),
-              decoration: BoxDecoration(
-                color: _hasText && !widget.disabled ? AppColors.purple : AppColors.border,
-                shape: BoxShape.circle,
-              ),
-              child: IconButton(
-                padding: EdgeInsets.zero,
-                icon: Icon(
-                  Icons.play_arrow,
-                  color: _hasText && !widget.disabled ? AppColors.white : AppColors.textMuted,
-                  size: 18,
+                child: Focus(
+                  focusNode: _focusNode,
+                  onKeyEvent: _handleKeyEvent,
+                  child: TextField(
+                    controller: _controller,
+                    focusNode: _textFieldFocus,
+                    autofocus: true,
+                    enabled: !widget.disabled,
+                    maxLines: 4,
+                    minLines: 1,
+                    style: AppTheme.uiFont(
+                      fontSize: 15,
+                      color: AppColors.textPrimary,
+                      height: 1.4,
+                    ),
+                    textInputAction: TextInputAction.send,
+                    decoration: InputDecoration(
+                      hintText: widget.disabled
+                          ? 'Connecting...'
+                          : 'Ask anything...',
+                      hintStyle: AppTheme.uiFont(
+                        fontSize: 15,
+                        color: AppColors.textMuted,
+                      ),
+                      border: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.lg,
+                        vertical: AppSpacing.md,
+                      ),
+                      isDense: false,
+                    ),
+                    onChanged: (value) {
+                      _historyIndex = -1;
+                      if (value.isEmpty != !_hasText) {
+                        setState(() => _hasText = value.isNotEmpty);
+                      }
+                    },
+                    onSubmitted: (_) {
+                      _submit();
+                      _textFieldFocus.requestFocus();
+                    },
+                  ),
                 ),
-                onPressed: _hasText && !widget.disabled ? _submit : null,
               ),
             ),
-        ],
+            const SizedBox(width: AppSpacing.sm),
+            // Send / Stop button — proper 44px touch target
+            _buildActionButton(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActionButton() {
+    if (widget.taskRunning && widget.onStop != null) {
+      return _ActionButton(
+        color: AppColors.red,
+        icon: Icons.stop_rounded,
+        onPressed: () {
+          HapticFeedback.mediumImpact();
+          widget.onStop!();
+        },
+      ).animate().scale(
+        duration: 200.ms,
+        curve: Curves.easeOutBack,
+      );
+    }
+
+    final active = _hasText && !widget.disabled;
+    return _ActionButton(
+      color: active ? AppColors.purple : AppColors.surfaceHigh,
+      icon: Icons.arrow_upward_rounded,
+      iconColor: active ? AppColors.white : AppColors.textMuted,
+      onPressed: active ? _submit : null,
+    );
+  }
+}
+
+class _ActionButton extends StatelessWidget {
+  final Color color;
+  final IconData icon;
+  final Color? iconColor;
+  final VoidCallback? onPressed;
+
+  const _ActionButton({
+    required this.color,
+    required this.icon,
+    this.iconColor,
+    this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeInOut,
+      width: AppSpacing.touchTarget,
+      height: AppSpacing.touchTarget,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+        boxShadow: onPressed != null ? AppColors.cardShadow : null,
+      ),
+      child: IconButton(
+        padding: EdgeInsets.zero,
+        icon: Icon(
+          icon,
+          color: iconColor ?? AppColors.white,
+          size: 22,
+        ),
+        onPressed: onPressed,
       ),
     );
   }

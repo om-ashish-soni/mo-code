@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import '../models/messages.dart';
 import '../theme/colors.dart';
@@ -49,7 +50,11 @@ class _TerminalOutputState extends State<TerminalOutput> {
     if (_autoScroll && widget.lines.length > oldWidget.lines.length) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_scrollController.hasClients) {
-          _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+          _scrollController.animateTo(
+            _scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+          );
         }
       });
     }
@@ -70,10 +75,23 @@ class _TerminalOutputState extends State<TerminalOutput> {
     return SelectionArea(
       child: ListView.builder(
         controller: _scrollController,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.lg,
+          vertical: AppSpacing.md,
+        ),
         itemCount: widget.lines.length,
         itemBuilder: (context, index) {
-          return _buildLine(widget.lines[index]);
+          final line = widget.lines[index];
+          final widget_ = _buildLine(line);
+
+          // Animate new items (last 3) sliding in
+          if (index >= widget.lines.length - 3) {
+            return widget_
+                .animate()
+                .fadeIn(duration: 250.ms, curve: Curves.easeOut)
+                .slideY(begin: 0.1, end: 0, duration: 250.ms, curve: Curves.easeOut);
+          }
+          return widget_;
         },
       ),
     );
@@ -82,58 +100,75 @@ class _TerminalOutputState extends State<TerminalOutput> {
   Widget _buildLine(TerminalLine line) {
     switch (line.type) {
       case TerminalLineType.userInput:
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 4),
-          child: Text(
-            '\$ ${line.content}',
-            style: const TextStyle(color: AppColors.green, fontSize: 13),
-          ),
-        );
+        return _buildUserInput(line.content);
       case TerminalLineType.agentThinking:
-        return Text(
-          '⟐ ${line.content}',
-          style: const TextStyle(
-            color: AppColors.textMuted,
-            fontSize: 13,
-            fontStyle: FontStyle.italic,
+        return Padding(
+          padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: AppColors.purple.withAlpha(150),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  line.content,
+                  style: AppTheme.uiFont(
+                    fontSize: 13,
+                    color: AppColors.textMuted,
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
+              ),
+            ],
           ),
         );
       case TerminalLineType.planStep:
         return _buildPlanStep(line.content);
       case TerminalLineType.fileCreated:
-        return _buildFileEvent('✓', AppColors.green, line.content);
+        return _buildFileEvent(Icons.add_circle_outline, AppColors.green, line.content);
       case TerminalLineType.fileModified:
-        return _buildFileEvent('~', AppColors.amber, line.content);
+        return _buildFileEvent(Icons.edit_outlined, AppColors.amber, line.content);
       case TerminalLineType.fileDeleted:
-        return _buildFileEvent('-', AppColors.red, line.content);
+        return _buildFileEvent(Icons.remove_circle_outline, AppColors.red, line.content);
       case TerminalLineType.toolCall:
         return _buildToolCall(line.content);
       case TerminalLineType.tokenCount:
         return Padding(
-          padding: const EdgeInsets.only(top: 2),
+          padding: const EdgeInsets.only(top: AppSpacing.xs),
           child: Text(
-            '● ${line.content}',
-            style: const TextStyle(
-              color: AppColors.textMuted,
+            line.content,
+            style: AppTheme.codeFont(
               fontSize: 11,
+              color: AppColors.textDisabled,
             ),
           ),
         );
       case TerminalLineType.separator:
-        return const Padding(
-          padding: EdgeInsets.symmetric(vertical: 8),
-          child: Text(
-            '────────────────',
-            style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+          child: Container(
+            height: 1,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  AppColors.border.withAlpha(0),
+                  AppColors.border,
+                  AppColors.border.withAlpha(0),
+                ],
+              ),
+            ),
           ),
         );
       case TerminalLineType.text:
         return _buildMarkdownText(line.content);
       case TerminalLineType.error:
-        return Text(
-          '! ${line.content}',
-          style: const TextStyle(color: AppColors.red, fontSize: 13),
-        );
+        return _buildError(line.content);
       case TerminalLineType.diff:
         if (line.diffData != null) {
           return DiffViewer(
@@ -150,25 +185,96 @@ class _TerminalOutputState extends State<TerminalOutput> {
     }
   }
 
-  /// Renders text content as markdown with syntax-highlighted code blocks.
+  Widget _buildUserInput(String content) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.lg,
+        vertical: AppSpacing.md,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.green.withAlpha(12),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+        border: Border.all(color: AppColors.green.withAlpha(30)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 20,
+            height: 20,
+            decoration: BoxDecoration(
+              color: AppColors.green.withAlpha(30),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: const Icon(Icons.person, size: 12, color: AppColors.green),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              content,
+              style: AppTheme.uiFont(
+                fontSize: 14,
+                color: AppColors.textPrimary,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildError(String content) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: AppSpacing.xs),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.red.withAlpha(12),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(color: AppColors.red.withAlpha(30)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline, size: 14, color: AppColors.red),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              content,
+              style: AppTheme.uiFont(fontSize: 13, color: AppColors.red),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildMarkdownText(String content) {
-    // For very short content or content without markdown markers, use plain text.
     if (content.length < 3 || !_looksLikeMarkdown(content)) {
-      return Text(
-        content,
-        style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 2),
+        child: Text(
+          content,
+          style: AppTheme.uiFont(
+            fontSize: 14,
+            color: AppColors.textPrimary,
+            height: 1.6,
+          ),
+        ),
       );
     }
 
     return MarkdownBody(
       data: content,
-      selectable: false, // Selection handled by parent SelectionArea
+      selectable: false,
       shrinkWrap: true,
       styleSheet: _markdownStyleSheet(),
     );
   }
 
-  /// Heuristic to detect markdown content worth rendering.
   bool _looksLikeMarkdown(String text) {
     return text.contains('```') ||
         text.contains('**') ||
@@ -181,63 +287,73 @@ class _TerminalOutputState extends State<TerminalOutput> {
 
   MarkdownStyleSheet _markdownStyleSheet() {
     return MarkdownStyleSheet(
-      p: const TextStyle(color: AppColors.textPrimary, fontSize: 13, height: 1.5),
-      h1: const TextStyle(
-          color: AppColors.white, fontSize: 18, fontWeight: FontWeight.bold),
-      h2: const TextStyle(
-          color: AppColors.white, fontSize: 16, fontWeight: FontWeight.bold),
-      h3: const TextStyle(
-          color: AppColors.white, fontSize: 14, fontWeight: FontWeight.bold),
-      code: TextStyle(
+      p: AppTheme.uiFont(fontSize: 14, color: AppColors.textPrimary, height: 1.6),
+      h1: AppTheme.uiFont(fontSize: 20, color: AppColors.white, fontWeight: FontWeight.w700),
+      h2: AppTheme.uiFont(fontSize: 17, color: AppColors.white, fontWeight: FontWeight.w600),
+      h3: AppTheme.uiFont(fontSize: 15, color: AppColors.white, fontWeight: FontWeight.w600),
+      code: AppTheme.codeFont(
         color: AppColors.amber,
-        backgroundColor: AppColors.surface.withValues(alpha: 0.5),
-        fontSize: 12,
-        fontFamily: 'JetBrainsMono',
-      ),
+        fontSize: 13,
+      ).copyWith(backgroundColor: AppColors.surface),
       codeblockDecoration: BoxDecoration(
-        color: const Color(0xFF1a1a2e),
-        borderRadius: BorderRadius.circular(6),
+        color: AppColors.background,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
         border: Border.all(color: AppColors.border, width: 0.5),
       ),
-      codeblockPadding: const EdgeInsets.all(12),
+      codeblockPadding: const EdgeInsets.all(AppSpacing.lg),
       blockquoteDecoration: BoxDecoration(
         border: Border(
-          left: BorderSide(color: AppColors.purple.withValues(alpha: 0.5), width: 3),
+          left: BorderSide(color: AppColors.purple.withAlpha(120), width: 3),
         ),
       ),
-      blockquotePadding: const EdgeInsets.only(left: 12, top: 4, bottom: 4),
-      listBullet:
-          const TextStyle(color: AppColors.textMuted, fontSize: 13),
-      a: const TextStyle(
-          color: AppColors.blue, decoration: TextDecoration.underline),
-      strong: const TextStyle(
-          color: AppColors.white, fontWeight: FontWeight.bold),
-      em: const TextStyle(
-          color: AppColors.textPrimary, fontStyle: FontStyle.italic),
-      tableHead: const TextStyle(
-          color: AppColors.white, fontWeight: FontWeight.bold, fontSize: 12),
-      tableBody: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+      blockquotePadding: const EdgeInsets.only(left: AppSpacing.lg, top: 4, bottom: 4),
+      listBullet: AppTheme.uiFont(fontSize: 14, color: AppColors.textMuted),
+      a: AppTheme.uiFont(fontSize: 14, color: AppColors.blue).copyWith(
+        decoration: TextDecoration.underline,
+      ),
+      strong: AppTheme.uiFont(fontSize: 14, color: AppColors.white, fontWeight: FontWeight.w600),
+      em: AppTheme.uiFont(fontSize: 14, color: AppColors.textPrimary).copyWith(
+        fontStyle: FontStyle.italic,
+      ),
+      tableHead: AppTheme.uiFont(fontSize: 12, color: AppColors.white, fontWeight: FontWeight.w600),
+      tableBody: AppTheme.uiFont(fontSize: 12, color: AppColors.textPrimary),
       tableBorder: TableBorder.all(color: AppColors.border, width: 0.5),
-      tableCellsPadding: const EdgeInsets.all(6),
+      tableCellsPadding: const EdgeInsets.all(AppSpacing.sm),
       horizontalRuleDecoration: BoxDecoration(
         border: Border(
-          top: BorderSide(color: AppColors.border.withValues(alpha: 0.5), width: 1),
+          top: BorderSide(color: AppColors.border.withAlpha(120), width: 1),
         ),
       ),
     );
   }
 
   Widget _buildToolCall(String content) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 2, bottom: 2),
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 2),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.purple.withAlpha(8),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+      ),
       child: Row(
         children: [
-          const Icon(Icons.build_outlined, size: 12, color: AppColors.purple),
-          const SizedBox(width: 6),
+          Container(
+            width: 18,
+            height: 18,
+            decoration: BoxDecoration(
+              color: AppColors.purple.withAlpha(25),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: const Icon(Icons.build_outlined, size: 11, color: AppColors.purple),
+          ),
+          const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
               content,
-              style: const TextStyle(color: AppColors.purple, fontSize: 12),
+              style: AppTheme.codeFont(fontSize: 12, color: AppColors.purple),
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -250,63 +366,97 @@ class _TerminalOutputState extends State<TerminalOutput> {
     final parts = content.split('. ');
     if (parts.length > 1) {
       return Padding(
-        padding: const EdgeInsets.only(bottom: 4),
+        padding: const EdgeInsets.only(bottom: AppSpacing.sm),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              parts[0].trim(),
-              style: const TextStyle(color: AppColors.purple, fontSize: 13),
-            ),
-            const SizedBox(width: 4),
-            Expanded(
+            Container(
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                color: AppColors.purpleDim,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              alignment: Alignment.center,
               child: Text(
-                parts.sublist(1).join('. '),
-                style: const TextStyle(color: AppColors.white, fontSize: 13),
+                parts[0].trim(),
+                style: AppTheme.uiFont(
+                  fontSize: 11,
+                  color: AppColors.purpleLight,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  parts.sublist(1).join('. '),
+                  style: AppTheme.uiFont(
+                    fontSize: 14,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
               ),
             ),
           ],
         ),
       );
     }
-    return Text(
-      content,
-      style: const TextStyle(color: AppColors.white, fontSize: 13),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+      child: Text(
+        content,
+        style: AppTheme.uiFont(fontSize: 14, color: AppColors.textPrimary),
+      ),
     );
   }
 
-  Widget _buildFileEvent(String prefix, Color color, String content) {
+  Widget _buildFileEvent(IconData icon, Color color, String content) {
     final filename = content.split(':').first.trim();
     final details =
         content.contains(':') ? content.split(':').sublist(1).join(':') : '';
 
     return GestureDetector(
       onTap: () => widget.onFileTap?.call(filename),
-      child: Padding(
-        padding: const EdgeInsets.only(top: 1, bottom: 1),
-        child: RichText(
-          text: TextSpan(
-            children: [
-              TextSpan(
-                text: prefix,
-                style: TextStyle(color: color, fontSize: 13),
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 1),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.sm,
+        ),
+        decoration: BoxDecoration(
+          color: color.withAlpha(8),
+          borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 14, color: color),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Text.rich(
+                TextSpan(children: [
+                  TextSpan(
+                    text: filename,
+                    style: AppTheme.codeFont(
+                      fontSize: 12,
+                      color: color,
+                    ).copyWith(decoration: TextDecoration.underline),
+                  ),
+                  if (details.isNotEmpty)
+                    TextSpan(
+                      text: details,
+                      style: AppTheme.codeFont(
+                        fontSize: 12,
+                        color: AppColors.textMuted,
+                      ),
+                    ),
+                ]),
+                overflow: TextOverflow.ellipsis,
               ),
-              TextSpan(
-                text: ' $filename',
-                style: TextStyle(
-                  color: color,
-                  fontSize: 13,
-                  decoration: TextDecoration.underline,
-                ),
-              ),
-              if (details.isNotEmpty)
-                TextSpan(
-                  text: details,
-                  style:
-                      const TextStyle(color: AppColors.textMuted, fontSize: 13),
-                ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

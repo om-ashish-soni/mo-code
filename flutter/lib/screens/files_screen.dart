@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../api/daemon.dart';
 import '../theme/colors.dart';
@@ -106,17 +107,19 @@ class _FilesScreenState extends State<FilesScreen> with SingleTickerProviderStat
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.panel,
-        title: const Text(
+        elevation: 0,
+        title: Text(
           'Files',
-          style: TextStyle(color: AppColors.white, fontSize: 18),
+          style: AppTheme.uiFont(fontSize: 18, color: AppColors.white, fontWeight: FontWeight.w600),
         ),
         actions: [
           IconButton(
             icon: Icon(
-              _searchContent ? Icons.text_snippet : Icons.insert_drive_file_outlined,
+              _searchContent ? Icons.text_snippet_rounded : Icons.insert_drive_file_outlined,
               color: _searchContent ? AppColors.purple : AppColors.textMuted,
             ),
             onPressed: () {
+              HapticFeedback.selectionClick();
               setState(() {
                 _searchContent = !_searchContent;
                 _searchResults = [];
@@ -129,7 +132,7 @@ class _FilesScreenState extends State<FilesScreen> with SingleTickerProviderStat
             tooltip: _searchContent ? 'Search by filename' : 'Search file contents',
           ),
           IconButton(
-            icon: const Icon(Icons.folder_open, color: AppColors.textMuted),
+            icon: const Icon(Icons.folder_open_rounded, color: AppColors.textMuted),
             onPressed: _showDirectoryPicker,
             tooltip: 'Change directory',
           ),
@@ -162,20 +165,20 @@ class _FilesScreenState extends State<FilesScreen> with SingleTickerProviderStat
 
   Widget _buildSearchBar() {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(AppSpacing.md),
       color: AppColors.panel,
       child: TextField(
         controller: _searchController,
-        style: const TextStyle(color: AppColors.textPrimary),
+        style: AppTheme.uiFont(fontSize: 14, color: AppColors.textPrimary),
         decoration: InputDecoration(
           hintText: _searchContent ? 'Search in file contents...' : 'Search files by name...',
           prefixIcon: Icon(
-            _searchContent ? Icons.search : Icons.filter_list,
+            _searchContent ? Icons.search_rounded : Icons.filter_list_rounded,
             color: AppColors.textMuted,
           ),
           suffixIcon: _searchController.text.isNotEmpty
               ? IconButton(
-                  icon: const Icon(Icons.clear, color: AppColors.textMuted),
+                  icon: const Icon(Icons.clear_rounded, color: AppColors.textMuted),
                   onPressed: () {
                     _searchController.clear();
                     _onSearchChanged('');
@@ -183,10 +186,18 @@ class _FilesScreenState extends State<FilesScreen> with SingleTickerProviderStat
                 )
               : null,
           filled: true,
-          fillColor: AppColors.background,
+          fillColor: AppColors.surface,
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: AppColors.border),
+            borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+            borderSide: BorderSide.none,
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+            borderSide: BorderSide.none,
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+            borderSide: const BorderSide(color: AppColors.purple, width: 1.5),
           ),
         ),
         onChanged: _onSearchChanged,
@@ -196,22 +207,22 @@ class _FilesScreenState extends State<FilesScreen> with SingleTickerProviderStat
 
   Widget _buildDirectoryBanner() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
       color: AppColors.panel,
       child: Row(
         children: [
-          const Icon(Icons.folder, color: AppColors.amber, size: 16),
-          const SizedBox(width: 6),
+          const Icon(Icons.folder_rounded, color: AppColors.amber, size: 16),
+          const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
               _workingDir!,
-              style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
+              style: AppTheme.codeFont(fontSize: 12, color: AppColors.textMuted),
               overflow: TextOverflow.ellipsis,
             ),
           ),
           GestureDetector(
             onTap: () => setState(() => _workingDir = null),
-            child: const Icon(Icons.close, color: AppColors.textMuted, size: 14),
+            child: const Icon(Icons.close_rounded, color: AppColors.textMuted, size: 14),
           ),
         ],
       ),
@@ -220,15 +231,15 @@ class _FilesScreenState extends State<FilesScreen> with SingleTickerProviderStat
 
   Widget _buildSearchModeBanner() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      color: AppColors.purple.withAlpha(15),
-      child: const Row(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.xs),
+      color: AppColors.purpleDim.withAlpha(40),
+      child: Row(
         children: [
-          Icon(Icons.text_snippet, color: AppColors.purple, size: 14),
-          SizedBox(width: 6),
+          const Icon(Icons.text_snippet_rounded, color: AppColors.purple, size: 14),
+          const SizedBox(width: AppSpacing.sm),
           Text(
             'Searching file contents (regex supported)',
-            style: TextStyle(color: AppColors.purple, fontSize: 11),
+            style: AppTheme.uiFont(fontSize: 11, color: AppColors.purple),
           ),
         ],
       ),
@@ -240,26 +251,34 @@ class _FilesScreenState extends State<FilesScreen> with SingleTickerProviderStat
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
-            _searchContent ? Icons.text_snippet_outlined : Icons.search,
-            color: AppColors.textMuted,
-            size: 48,
+          Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+            ),
+            child: Icon(
+              _searchContent ? Icons.text_snippet_outlined : Icons.search_rounded,
+              color: AppColors.textMuted,
+              size: 32,
+            ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: AppSpacing.lg),
           Text(
             _searchController.text.isEmpty
                 ? _searchContent
                     ? 'Search in file contents'
                     : 'Search for files by name'
                 : 'No results found',
-            style: const TextStyle(color: AppColors.textMuted),
+            style: AppTheme.uiFont(fontSize: 15, color: AppColors.textSecondary),
           ),
           if (_searchController.text.isEmpty && !_searchContent)
-            const Padding(
-              padding: EdgeInsets.only(top: 8),
+            Padding(
+              padding: const EdgeInsets.only(top: AppSpacing.sm),
               child: Text(
                 'Try *.go, main.dart, or any filename',
-                style: TextStyle(color: AppColors.textMuted, fontSize: 11),
+                style: AppTheme.uiFont(fontSize: 12, color: AppColors.textMuted),
               ),
             ),
         ],
@@ -269,6 +288,7 @@ class _FilesScreenState extends State<FilesScreen> with SingleTickerProviderStat
 
   Widget _buildFileList() {
     return ListView.builder(
+      padding: const EdgeInsets.only(top: AppSpacing.xs),
       itemCount: _searchResults.length,
       itemBuilder: (context, index) {
         final file = _searchResults[index];
@@ -280,11 +300,11 @@ class _FilesScreenState extends State<FilesScreen> with SingleTickerProviderStat
           leading: _FileIcon(extension: ext),
           title: Text(
             name,
-            style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
+            style: AppTheme.uiFont(fontSize: 14, color: AppColors.textPrimary, fontWeight: FontWeight.w500),
           ),
           subtitle: Text(
             path,
-            style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+            style: AppTheme.codeFont(fontSize: 11, color: AppColors.textMuted),
             overflow: TextOverflow.ellipsis,
           ),
           trailing: _ExtBadge(ext: ext),
@@ -299,6 +319,7 @@ class _FilesScreenState extends State<FilesScreen> with SingleTickerProviderStat
 
   Widget _buildContentResults() {
     return ListView.builder(
+      padding: const EdgeInsets.only(top: AppSpacing.xs),
       itemCount: _contentResults.length,
       itemBuilder: (context, index) {
         final match = _contentResults[index];
@@ -308,21 +329,21 @@ class _FilesScreenState extends State<FilesScreen> with SingleTickerProviderStat
         final name = path.split('/').last;
 
         return ListTile(
-          leading: const Icon(Icons.code, color: AppColors.textMuted, size: 20),
+          leading: const Icon(Icons.code_rounded, color: AppColors.textMuted, size: 20),
           title: Row(
             children: [
               Flexible(
                 child: Text(
                   name,
-                  style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
+                  style: AppTheme.uiFont(fontSize: 14, color: AppColors.textPrimary, fontWeight: FontWeight.w500),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
               if (line != null) ...[
-                const SizedBox(width: 4),
+                const SizedBox(width: AppSpacing.xs),
                 Text(
                   ':$line',
-                  style: const TextStyle(color: AppColors.amber, fontSize: 12),
+                  style: AppTheme.codeFont(fontSize: 12, color: AppColors.amber),
                 ),
               ],
             ],
@@ -332,19 +353,15 @@ class _FilesScreenState extends State<FilesScreen> with SingleTickerProviderStat
             children: [
               Text(
                 path,
-                style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+                style: AppTheme.codeFont(fontSize: 10, color: AppColors.textMuted),
                 overflow: TextOverflow.ellipsis,
               ),
               if (content.isNotEmpty)
                 Padding(
-                  padding: const EdgeInsets.only(top: 4),
+                  padding: const EdgeInsets.only(top: AppSpacing.xs),
                   child: Text(
                     content.trim(),
-                    style: const TextStyle(
-                      color: AppColors.textPrimary,
-                      fontSize: 11,
-                      fontFamily: 'monospace',
-                    ),
+                    style: AppTheme.codeFont(fontSize: 11, color: AppColors.textPrimary),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -364,15 +381,15 @@ class _FilesScreenState extends State<FilesScreen> with SingleTickerProviderStat
     return Container(
       decoration: const BoxDecoration(
         color: AppColors.panel,
-        border: Border(top: BorderSide(color: AppColors.border)),
+        border: Border(top: BorderSide(color: AppColors.border, width: 0.5)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(AppSpacing.md),
             decoration: const BoxDecoration(
-              border: Border(bottom: BorderSide(color: AppColors.border)),
+              border: Border(bottom: BorderSide(color: AppColors.border, width: 0.5)),
             ),
             child: Row(
               children: [
@@ -381,16 +398,16 @@ class _FilesScreenState extends State<FilesScreen> with SingleTickerProviderStat
                   color: AppColors.textMuted,
                   size: 16,
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: AppSpacing.sm),
                 Expanded(
                   child: Text(
                     _selectedFile?['path'] ?? '',
-                    style: const TextStyle(color: AppColors.textPrimary, fontSize: 13),
+                    style: AppTheme.codeFont(fontSize: 13, color: AppColors.textPrimary),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.close, color: AppColors.textMuted, size: 18),
+                  icon: const Icon(Icons.close_rounded, color: AppColors.textMuted, size: 18),
                   onPressed: () {
                     setState(() {
                       _selectedFile = null;
@@ -405,14 +422,10 @@ class _FilesScreenState extends State<FilesScreen> with SingleTickerProviderStat
           ),
           Expanded(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(AppSpacing.lg),
               child: SelectableText(
                 _fileContent ?? '',
-                style: const TextStyle(
-                  color: AppColors.textPrimary,
-                  fontSize: 12,
-                  fontFamily: 'monospace',
-                ),
+                style: AppTheme.codeFont(fontSize: 12, color: AppColors.textPrimary),
               ),
             ),
           ),
@@ -485,14 +498,14 @@ class _ExtBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     if (ext.isEmpty) return const SizedBox.shrink();
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 2),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
       ),
       child: Text(
         '.$ext',
-        style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+        style: AppTheme.codeFont(fontSize: 10, color: AppColors.textMuted),
       ),
     );
   }
@@ -523,20 +536,26 @@ class _DirectoryPickerDialogState extends State<_DirectoryPickerDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       backgroundColor: AppColors.panel,
-      title: const Text('Working Directory', style: TextStyle(color: AppColors.white)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppSpacing.radiusLg)),
+      title: Text('Working Directory', style: AppTheme.uiFont(fontSize: 18, color: AppColors.white, fontWeight: FontWeight.w600)),
       content: TextField(
         controller: _controller,
-        style: const TextStyle(color: AppColors.textPrimary),
-        decoration: const InputDecoration(
+        style: AppTheme.codeFont(fontSize: 14, color: AppColors.textPrimary),
+        decoration: InputDecoration(
           hintText: '/path/to/project',
+          hintStyle: AppTheme.codeFont(fontSize: 14, color: AppColors.textDisabled),
           filled: true,
-          fillColor: AppColors.background,
+          fillColor: AppColors.surface,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+            borderSide: BorderSide.none,
+          ),
         ),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel', style: TextStyle(color: AppColors.textMuted)),
+          child: Text('Cancel', style: AppTheme.uiFont(fontSize: 14, color: AppColors.textMuted)),
         ),
         ElevatedButton(
           onPressed: () {
