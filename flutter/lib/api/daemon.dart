@@ -397,6 +397,18 @@ class OpenCodeAPI {
     }
   }
 
+  // --- Daemon logs ---
+
+  /// Get the last 200 lines of daemon logs (Android only).
+  Future<String?> getDaemonLogs() async {
+    if (!Platform.isAndroid) return null;
+    try {
+      return await _daemonChannel.invokeMethod<String>('getLogs');
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
   // --- Runtime environment (proot + Alpine) ---
 
   /// Get runtime bootstrap status from the platform channel (Android only).
@@ -566,9 +578,10 @@ class OpenCodeAPI {
   }
 
   /// Send a task.start message over WebSocket to begin an agent task.
-  String? startTask(String prompt, {String? provider, String? workingDir}) {
+  /// If [taskId] is provided, it's used as the message ID (for session reuse).
+  String? startTask(String prompt, {String? provider, String? workingDir, String? taskId}) {
     _msgCounter++;
-    final id = 'msg-$_msgCounter-${DateTime.now().millisecondsSinceEpoch}';
+    final id = taskId ?? 'msg-$_msgCounter-${DateTime.now().millisecondsSinceEpoch}';
     final sent = sendWsJson({
       'type': 'task.start',
       'id': id,

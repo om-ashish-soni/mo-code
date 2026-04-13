@@ -40,6 +40,8 @@ const (
 	TypeSessionGet     = "session.get"
 	TypeSessionResume  = "session.resume"
 	TypeSessionDelete  = "session.delete"
+	TypeSessionInfo    = "session.info"
+	TypeSessionClear   = "session.clear"
 	TypeFSList         = "fs.list"
 	TypeFSRead         = "fs.read"
 	TypeGitStatus      = "git.status"
@@ -57,6 +59,8 @@ const (
 	TypeTaskQueued         = "task.queued"
 	TypeSessionListResult  = "session.list_result"
 	TypeSessionGetResult   = "session.get_result"
+	TypeSessionInfoResult  = "session.info_result"
+	TypeSessionClearResult = "session.clear_result"
 	TypeFSTree             = "fs.tree"
 	TypeFSContent          = "fs.content"
 	TypeGitDiffResult      = "git.diff_result"
@@ -104,6 +108,25 @@ type SessionResumePayload struct {
 
 type SessionDeletePayload struct {
 	ID string `json:"id"`
+}
+
+type SessionInfoPayload struct {
+	ID string `json:"id"`
+}
+
+type SessionClearPayload struct {
+	ID string `json:"id"`
+}
+
+// SessionInfoResultPayload is sent in response to session.info requests.
+type SessionInfoResultPayload struct {
+	ID              string `json:"id"`
+	Title           string `json:"title"`
+	MessageCount    int    `json:"message_count"`
+	TokensUsed      int    `json:"tokens_used"`
+	State           string `json:"state"`
+	Provider        string `json:"provider"`
+	CompactionCount int    `json:"compaction_count"`
 }
 
 type FSListPayload struct {

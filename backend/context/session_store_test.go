@@ -140,6 +140,132 @@ func TestSessionStoreAppendMessageNotFound(t *testing.T) {
 	}
 }
 
+// --- Concurrent access (run with -race) ---
+
+func TestSessionStore_ConcurrentAccess(t *testing.T) {
+	dir := t.TempDir()
+	store, _ := NewSessionStore(dir)
+
+	store.Create("concurrent-1", "test", "/tmp", "claude", "")
+
+	done := make(chan struct{})
+
+	// Writer goroutine: append messages.
+	go func() {
+		defer func() { done <- struct{}{} }()
+		for i := 0; i < 50; i++ {
+			store.AppendMessage("concurrent-1", provider.Message{
+				Role:    provider.RoleUser,
+				Content: "msg",
+			})
+		}
+	}()
+
+	// Reader goroutine: read session.
+	go func() {
+		defer func() { done <- struct{}{} }()
+		for i := 0; i < 50; i++ {
+			sess := store.Get("concurrent-1")
+			if sess == nil {
+				t.Error("Get returned nil during concurrent access")
+				return
+			}
+			_ = len(sess.Messages)
+		}
+	}()
+
+	// List goroutine.
+	go func() {
+		defer func() { done <- struct{}{} }()
+		for i := 0; i < 50; i++ {
+			list := store.List()
+			_ = len(list)
+		}
+	}()
+
+	// State update goroutine.
+	go func() {
+		defer func() { done <- struct{}{} }()
+		for i := 0; i < 50; i++ {
+			store.UpdateState("concurrent-1", "active")
+		}
+	}()
+
+	// Wait for all goroutines.
+	for i := 0; i < 4; i++ {
+		<-done
+	}
+
+	sess := store.Get("concurrent-1")
+	if sess == nil {
+		t.Fatal("session nil after concurrent ops")
+	}
+	if len(sess.Messages) != 50 {
+		t.Errorf("expected 50 messages, got %d", len(sess.Messages))
+	}
+}
+
+// --- Large message history ---
+
+func TestSessionStore_LargeMessageHistory(t *testing.T) {
+	dir := t.TempDir()
+	store, _ := NewSessionStore(dir)
+
+	store.Create("large-1", "stress test", "/tmp", "claude", "")
+
+	// Append 150 messages.
+	for i := 0; i < 150; i++ {
+		role := provider.RoleUser
+		if i%2 == 1 {
+			role = provider.RoleAssistant
+		}
+		store.AppendMessage("large-1", provider.Message{
+			Role:    role,
+			Content: "message number " + string(rune('0'+i%10)),
+		})
+	}
+
+	sess := store.Get("large-1")
+	if len(sess.Messages) != 150 {
+		t.Fatalf("expected 150 messages, got %d", len(sess.Messages))
+	}
+
+	// Verify persistence with large history.
+	store2, _ := NewSessionStore(dir)
+	sess2 := store2.Get("large-1")
+	if sess2 == nil {
+		t.Fatal("session lost after reload")
+	}
+	if len(sess2.Messages) != 150 {
+		t.Fatalf("expected 150 messages after reload, got %d", len(sess2.Messages))
+	}
+}
+
+// --- UpdateTokens ---
+
+func TestSessionStore_UpdateTokens(t *testing.T) {
+	dir := t.TempDir()
+	store, _ := NewSessionStore(dir)
+
+	store.Create("tok-1", "test", "/tmp", "claude", "")
+	store.UpdateTokens("tok-1", 1234)
+
+	sess := store.Get("tok-1")
+	if sess.TokensUsed != 1234 {
+		t.Errorf("TokensUsed = %d, want 1234", sess.TokensUsed)
+	}
+}
+
+func TestSessionStore_UpdateTokens_NotFound(t *testing.T) {
+	dir := t.TempDir()
+	store, _ := NewSessionStore(dir)
+
+	err := store.UpdateTokens("nonexistent", 100)
+	if err == nil {
+		t.Error("expected error for nonexistent session")
+	}
+}
+
 func TestGenerateTitle(t *testing.T) {
 	tests := []struct {
 		input string

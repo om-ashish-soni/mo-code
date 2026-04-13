@@ -15,16 +15,28 @@ class AgentScreen extends StatefulWidget {
   const AgentScreen({super.key});
 
   @override
-  State<AgentScreen> createState() => _AgentScreenState();
+  State<AgentScreen> createState() => AgentScreenState();
 }
 
-class _AgentScreenState extends State<AgentScreen> {
+class AgentScreenState extends State<AgentScreen> {
   final List<TerminalLine> _lines = [];
   String _activeProvider = 'copilot';
   String _activeModel = 'gpt-4o';
   bool _connected = false;
   bool _taskRunning = false;
   String? _activeTaskId;
+
+  // Session continuity — persists across tasks within a conversation.
+  String? _sessionId;
+
+  /// Called from MainScreen when user resumes a session from the Sessions screen.
+  void resumeFromSession(String sessionId) {
+    setState(() {
+      _sessionId = sessionId;
+      _lines.clear();
+    });
+    _addLine(TerminalLine(type: TerminalLineType.text, content: 'Resumed session: $sessionId'));
+  }
 
   // Connection lifecycle
   bool _initializing = true; // true until first connect attempt finishes
@@ -233,6 +245,7 @@ class _AgentScreenState extends State<AgentScreen> {
         } else {
           _addLine(TerminalLine(type: TerminalLineType.text, content: 'Task completed'));
         }
+        // Keep _sessionId — session persists across tasks for multi-turn context.
         setState(() {
           _taskRunning = false;
           _activeTaskId = null;
@@ -245,6 +258,7 @@ class _AgentScreenState extends State<AgentScreen> {
         } else {
           _addLine(TerminalLine(type: TerminalLineType.error, content: 'Task failed'));
         }
+        // Keep _sessionId — user can retry within same context.
         setState(() {
           _taskRunning = false;
           _activeTaskId = null;
@@ -372,7 +386,10 @@ class _AgentScreenState extends State<AgentScreen> {
         _stopTask();
         return true;
       case '/clear':
-        setState(() => _lines.clear());
+        setState(() {
+          _lines.clear();
+          _sessionId = null; // fresh session on next prompt
+        });
         return true;
       case '/provider':
         if (arg.isNotEmpty && ['claude', 'gemini', 'copilot'].contains(arg.toLowerCase())) {
@@ -383,6 +400,7 @@ class _AgentScreenState extends State<AgentScreen> {
         }
         return true;
       case '/session':
+        _addLine(TerminalLine(type: TerminalLineType.text, content: 'Session: ${_sessionId ?? "none (new)"}'));
         _addLine(TerminalLine(type: TerminalLineType.text, content: 'Provider: $_activeProvider'));
         _addLine(TerminalLine(type: TerminalLineType.text, content: 'Model: $_activeModel'));
         _addLine(TerminalLine(type: TerminalLineType.text, content: 'Connected: $_connected'));
@@ -461,7 +479,15 @@ class _AgentScreenState extends State<AgentScreen> {
     setState(() => _taskRunning = true);
     _addLine(TerminalLine(type: TerminalLineType.agentThinking, content: 'Processing...'));
 
-    final taskId = api.startTask(prompt, provider: _activeProvider);
+    String? taskId;
+    if (_sessionId != null) {
+      // Follow-up prompt — resume existing session with full context.
+      taskId = api.resumeSession(_sessionId!, prompt);
+    } else {
+      // First prompt — generate session ID and start new task.
+      _sessionId = 'session-${DateTime.now().millisecondsSinceEpoch}';
+      taskId = api.startTask(prompt, provider: _activeProvider, taskId: _sessionId);
+    }
 
     if (taskId == null) {
       _addLine(TerminalLine(type: TerminalLineType.error, content: 'Failed to send task (no WebSocket connection)'));
@@ -593,14 +619,32 @@ class _AgentScreenState extends State<AgentScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            'mo-code',
-            style: AppTheme.uiFont(
-              fontSize: 13,
-              color: AppColors.textMuted,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.5,
-            ),
+          Row(
+            children: [
+              Text(
+                'mo-code',
+                style: AppTheme.uiFont(
+                  fontSize: 13,
+                  color: AppColors.textMuted,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.5,
+                ),
+              ),
+              if (_sessionId != null) ...[
+                const SizedBox(width: AppSpacing.sm),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: AppColors.purpleDim,
+                    borderRadius: BorderRadius.circular(AppSpacing.radiusFull),
+                  ),
+                  child: Text(
+                    'session',
+                    style: AppTheme.uiFont(fontSize: 9, color: AppColors.purple, fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ],
+            ],
           ),
           Row(
             children: [
