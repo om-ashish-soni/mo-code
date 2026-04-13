@@ -93,7 +93,7 @@ func TestProotEnv(t *testing.T) {
 }
 
 func TestNewProotRuntimeMissingBinary(t *testing.T) {
-	_, err := NewProotRuntime("/nonexistent/proot", "/tmp", "/tmp")
+	_, err := NewProotRuntime("/nonexistent/proot", "/tmp", "/tmp", "")
 	if err == nil {
 		t.Error("expected error for missing proot binary")
 	}
@@ -105,7 +105,7 @@ func TestNewProotRuntimeMissingRootFS(t *testing.T) {
 	prootBin := filepath.Join(tmp, "proot")
 	os.WriteFile(prootBin, []byte("#!/bin/sh"), 0o755)
 
-	_, err := NewProotRuntime(prootBin, "/nonexistent/rootfs", "/tmp")
+	_, err := NewProotRuntime(prootBin, "/nonexistent/rootfs", "/tmp", "")
 	if err == nil {
 		t.Error("expected error for missing rootfs")
 	}
@@ -121,7 +121,7 @@ func TestNewProotRuntimeCreatesProjectsDir(t *testing.T) {
 
 	projectsDir := filepath.Join(tmp, "projects", "new", "dir")
 
-	rt, err := NewProotRuntime(prootBin, rootfs, projectsDir)
+	rt, err := NewProotRuntime(prootBin, rootfs, projectsDir, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

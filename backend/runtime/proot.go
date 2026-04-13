@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,6 +29,13 @@ type ProotRuntime struct {
 	// Bind-mounted into proot at /home/developer.
 	ProjectsDir string
 
+	// LoaderBin is the path to the proot loader binary.
+	// On Android, rootfs binaries have app_data_file SELinux context which
+	// cannot be exec'd directly. The loader (in nativeLibraryDir, apk_data_file
+	// context) uses mmap to run binaries, bypassing the SELinux exec restriction.
+	// Empty string = proot extracts its built-in loader (may fail on Android).
+	LoaderBin string
+
 	// installed tracks which apk packages have been installed in this session.
 	installed   map[string]bool
 	installedMu sync.RWMutex
@@ -35,8 +43,9 @@ type ProotRuntime struct {
 
 // NewProotRuntime creates a runtime given paths to the proot binary,
 // Alpine rootfs, and the projects directory on the host.
+// loaderBin is the optional path to the proot-loader binary (empty = use built-in).
 // Returns an error if required paths don't exist.
-func NewProotRuntime(prootBin, rootFS, projectsDir string) (*ProotRuntime, error) {
+func NewProotRuntime(prootBin, rootFS, projectsDir, loaderBin string) (*ProotRuntime, error) {
 	if _, err := os.Stat(prootBin); err != nil {
 		return nil, fmt.Errorf("proot binary not found: %s", prootBin)
 	}
@@ -68,12 +77,19 @@ func NewProotRuntime(prootBin, rootFS, projectsDir string) (*ProotRuntime, error
 	}
 	_ = os.WriteFile(resolvPath, []byte(resolvContent.String()), 0o644)
 
-	return &ProotRuntime{
+	r := &ProotRuntime{
 		ProotBin:    prootBin,
 		RootFS:      rootFS,
 		ProjectsDir: projectsDir,
 		installed:   make(map[string]bool),
-	}, nil
+	}
+	if loaderBin != "" {
+		if _, err := os.Stat(loaderBin); err == nil {
+			_ = os.Chmod(loaderBin, 0o755)
+			r.LoaderBin = loaderBin
+		}
+	}
+	return r, nil
 }
 
 // prootArgs builds the proot command-line arguments.
@@ -89,18 +105,19 @@ func (r *ProotRuntime) prootArgs(workDir string) []string {
 	}
 
 	args := []string{
-		"-0",                                         // fake root
-		"-r", r.RootFS,                               // rootfs
-		"-b", "/dev",                                  // bind /dev
-		"-b", "/proc",                                 // bind /proc
-		"-b", "/sys",                                  // bind /sys
-		"-b", r.ProjectsDir + ":/home/developer",      // bind projects
-		"-w", prootWorkDir,                            // working directory
+		"-0",                                    // fake root
+		"-r", r.RootFS,                          // rootfs
+		"-b", "/dev",                            // bind /dev
+		"-b", "/proc",                           // bind /proc
+		"-b", "/sys",                            // bind /sys
+		"-b", r.ProjectsDir + ":/home/developer", // bind projects
 	}
 	// Bind host resolv.conf if it exists; otherwise rely on rootfs copy.
 	if _, err := os.Stat("/etc/resolv.conf"); err == nil {
 		args = append(args, "-b", "/etc/resolv.conf:/etc/resolv.conf")
 	}
+	// -w must come last so test assertions (and proot arg parsing) are stable.
+	args = append(args, "-w", prootWorkDir)
 	return args
 }
 
@@ -111,9 +128,9 @@ func (r *ProotRuntime) Exec(ctx context.Context, command, workDir string) (stdou
 	args = append(args, "/bin/sh", "-c", command)
 
 	cmd := exec.CommandContext(ctx, r.ProotBin, args...)
-
-	// Set environment variables inside proot.
 	cmd.Env = r.prootEnv()
+
+	log.Printf("[proot] exec: %s %s", r.ProotBin, strings.Join(args, " "))
 
 	var outBuf, errBuf bytes.Buffer
 	cmd.Stdout = &outBuf
@@ -127,6 +144,7 @@ func (r *ProotRuntime) Exec(ctx context.Context, command, workDir string) (stdou
 
 	if runErr != nil {
 		if ctx.Err() == context.DeadlineExceeded {
+			log.Printf("[proot] timeout: %s", command)
 			return stdout, stderr, -1, fmt.Errorf("command timed out")
 		}
 		if exitErr, ok := runErr.(*exec.ExitError); ok {
@@ -137,11 +155,18 @@ func (r *ProotRuntime) Exec(ctx context.Context, command, workDir string) (stdou
 		}
 	}
 
+	if exitCode != 0 || err != nil {
+		log.Printf("[proot] FAILED exit=%d err=%v cmd=%q", exitCode, err, command)
+		if stderr != "" {
+			log.Printf("[proot] stderr: %s", strings.TrimSpace(stderr))
+		}
+	}
+
 	return stdout, stderr, exitCode, err
 }
 
 // prootEnv returns the environment variables for the proot process.
-// Includes both host-side vars (PROOT_TMP_DIR) and guest-side vars.
+// Includes both host-side vars (PROOT_TMP_DIR, LD_LIBRARY_PATH) and guest-side vars.
 func (r *ProotRuntime) prootEnv() []string {
 	env := []string{
 		"HOME=/home/developer",
@@ -150,9 +175,27 @@ func (r *ProotRuntime) prootEnv() []string {
 		"LANG=C.UTF-8",
 		"TERM=xterm-256color",
 		"SHELL=/bin/sh",
+		// Force ptrace mode — Android restricts seccomp-based interception.
+		"PROOT_NO_SECCOMP=1",
 	}
+
+	// LD_LIBRARY_PATH: Termux proot is dynamically linked against libtalloc.so.
+	// nativeLibraryDir is the only executable + writable-at-install location.
+	// Android linker checks LD_LIBRARY_PATH before RUNPATH in the binary.
+	nativeLibDir := filepath.Dir(r.ProotBin)
+	env = append(env, "LD_LIBRARY_PATH="+nativeLibDir)
+
+	// PROOT_LOADER: rootfs binaries have app_data_file SELinux context which
+	// blocks direct execve from untrusted_app. The loader (apk_data_file in
+	// nativeLibraryDir) uses mmap to exec binaries, bypassing SELinux exec check.
+	if r.LoaderBin != "" {
+		env = append(env, "PROOT_LOADER="+r.LoaderBin)
+		log.Printf("[proot] env: loader=%s nativeLibDir=%s", r.LoaderBin, nativeLibDir)
+	} else {
+		log.Printf("[proot] WARNING: no PROOT_LOADER set — SELinux exec will likely fail on Android")
+	}
+
 	// PROOT_TMP_DIR: proot needs a writable tmp dir on the host.
-	// On Android, /tmp doesn't exist; use the cache dir or rootfs/tmp.
 	tmpDir := os.Getenv("TMPDIR")
 	if tmpDir == "" {
 		tmpDir = filepath.Join(r.RootFS, "tmp")

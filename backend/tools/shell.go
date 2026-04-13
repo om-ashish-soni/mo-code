@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -122,12 +123,24 @@ func (s *ShellExec) Execute(ctx context.Context, argsJSON string) Result {
 	var exitCode int
 	var runErr error
 
+	execRuntime := "host"
 	if s.proot != nil {
-		// Route through proot + Alpine.
+		execRuntime = "proot"
 		stdoutStr, stderrStr, exitCode, runErr = s.proot.Exec(cmdCtx, args.Command, workDir)
+		// proot exits 255 when the tracee dies from a signal (e.g. SIGSEGV in the
+		// loader) before producing any output. On Android 15 this means the SELinux
+		// exec restriction blocked the loader — see ISSUE-010.
+		if exitCode == 255 && stdoutStr == "" && stderrStr == "" {
+			stderrStr = "proot exited with code 255 — the shell environment could not start. " +
+				"On Android 15 this is caused by SELinux blocking exec of rootfs binaries (ISSUE-010). " +
+				"Git operations (status, log, add, commit, push) still work via the built-in go-git library. " +
+				"Commands requiring npm, pip, or other tools are unavailable until the proot issue is resolved."
+		}
 	} else {
-		// Direct host execution.
 		stdoutStr, stderrStr, exitCode, runErr = s.execDirect(cmdCtx, args.Command, workDir)
+	}
+	if exitCode != 0 || runErr != nil {
+		log.Printf("[shell] FAILED runtime=%s exit=%d err=%v cmd=%q", execRuntime, exitCode, runErr, args.Command)
 	}
 
 	var sb strings.Builder

@@ -12,10 +12,12 @@ import (
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
+
+	"mo-code/backend/runtime"
 )
 
 // Note: This file uses go-git for status, log, add, commit, push operations.
-// GitDiff still uses CLI for simplicity, as go-git diff API is complex for worktree diffs.
+// GitDiff uses CLI (via proot when configured, host git otherwise).
 // SSH authentication is supported for push operations.
 
 // --- GitStatus tool ---
@@ -79,10 +81,17 @@ func (g *GitStatus) Execute(ctx context.Context, argsJSON string) Result {
 // GitDiff shows the diff of changes in the working directory.
 type GitDiff struct {
 	workDir string
+	proot   *runtime.ProotRuntime
 }
 
-func NewGitDiff(workDir string) *GitDiff {
-	return &GitDiff{workDir: workDir}
+// NewGitDiff creates a GitDiff tool. Pass a ProotRuntime to route git through
+// Alpine on Android (required when host has no system git).
+func NewGitDiff(workDir string, proot ...*runtime.ProotRuntime) *GitDiff {
+	g := &GitDiff{workDir: workDir}
+	if len(proot) > 0 {
+		g.proot = proot[0]
+	}
+	return g
 }
 
 func (g *GitDiff) Name() string { return "git_diff" }
@@ -147,6 +156,26 @@ func (g *GitDiff) Execute(ctx context.Context, argsJSON string) Result {
 }
 
 func (g *GitDiff) runGit(ctx context.Context, args ...string) (string, error) {
+	// On Android, there is no system git. Route through proot (Alpine's git)
+	// when a proot runtime is configured.
+	if g.proot != nil {
+		cmd := "git " + strings.Join(args, " ")
+		stdout, stderr, code, err := g.proot.Exec(ctx, cmd, g.workDir)
+		if err != nil || code != 0 {
+			if stderr != "" {
+				return "", fmt.Errorf("git %s: %s", args[0], stderr)
+			}
+			return "", fmt.Errorf("git %s: exit %d", args[0], code)
+		}
+		if stdout == "" {
+			return "(no changes)", nil
+		}
+		if len(stdout) > 50*1024 {
+			stdout = stdout[:50*1024] + "\n... (diff truncated at 50KB)"
+		}
+		return stdout, nil
+	}
+
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = g.workDir
 	var stdout, stderr bytes.Buffer
@@ -162,7 +191,6 @@ func (g *GitDiff) runGit(ctx context.Context, args ...string) (string, error) {
 	if output == "" {
 		return "(no changes)", nil
 	}
-	// Truncate very large diffs.
 	if len(output) > 50*1024 {
 		output = output[:50*1024] + "\n... (diff truncated at 50KB)"
 	}

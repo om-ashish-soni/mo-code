@@ -127,6 +127,17 @@ class DaemonService : Service() {
         val workDir: String = getExternalFilesDir(null)?.absolutePath ?: dataDir
         val dnsServers = getSystemDnsServers()
 
+        // Android's system CA certificates for Go's TLS stack.
+        // Go's crypto/x509 reads PEM files from SSL_CERT_DIR; Android 14+ moved certs to the
+        // APEX path, so try both and use whichever exists.
+        val sslCertDir = when {
+            java.io.File("/apex/com.android.conscrypt/cacerts").isDirectory ->
+                "/apex/com.android.conscrypt/cacerts"
+            java.io.File("/system/etc/security/cacerts").isDirectory ->
+                "/system/etc/security/cacerts"
+            else -> null
+        }
+
         val env = mutableMapOf(
             "MOCODE_PORT_FILE" to portFile.absolutePath,
             "MOCODE_WORKDIR" to workDir,
@@ -134,11 +145,26 @@ class DaemonService : Service() {
             "TMPDIR" to cacheDir.absolutePath,
             "MOCODE_DNS" to dnsServers,
         )
+        if (sslCertDir != null) {
+            env["SSL_CERT_DIR"] = sslCertDir
+            Log.i(TAG, "TLS: using CA certs from $sslCertDir")
+        } else {
+            Log.w(TAG, "TLS: no system CA cert directory found — HTTPS may fail")
+        }
 
         if (runtimePaths != null) {
             env["MOCODE_PROOT_BIN"] = runtimePaths.prootBin
             env["MOCODE_PROOT_ROOTFS"] = runtimePaths.rootFS
             env["MOCODE_PROOT_PROJECTS"] = runtimePaths.projectsDir
+            // libproot-loader.so lives in nativeLibraryDir (apk_data_file SELinux context = executable).
+            // proot uses this loader to exec binaries from filesDir (app_data_file = not exec-able directly).
+            val loaderPath = File(applicationInfo.nativeLibraryDir, "libproot-loader.so")
+            if (loaderPath.exists()) {
+                env["MOCODE_PROOT_LOADER"] = loaderPath.absolutePath
+                Log.i(TAG, "proot loader: ${loaderPath.absolutePath}")
+            } else {
+                Log.w(TAG, "proot loader not found at ${loaderPath.absolutePath}, SELinux exec may fail")
+            }
             Log.i(TAG, "proot enabled: bin=${runtimePaths.prootBin} rootfs=${runtimePaths.rootFS}")
         }
 

@@ -48,9 +48,21 @@ func NewTaskManager(runner agent.Runner) *TaskManager {
 // StartTask starts a new agent task. Returns an event channel for streaming.
 func (tm *TaskManager) StartTask(req agent.TaskRequest) (<-chan agent.Event, error) {
 	tm.mu.Lock()
-	if _, exists := tm.tasks[req.ID]; exists {
-		tm.mu.Unlock()
-		return nil, fmt.Errorf("task %s already exists", req.ID)
+	if existing, exists := tm.tasks[req.ID]; exists {
+		// Allow reusing a task ID if the previous task finished (completed/canceled/failed).
+		// Only block if a task with this ID is still actively running.
+		if existing.state == agent.StateRunning {
+			tm.mu.Unlock()
+			return nil, fmt.Errorf("task %s is already running", req.ID)
+		}
+		// Clean up the finished task so the ID can be reused.
+		delete(tm.tasks, req.ID)
+		for i, id := range tm.order {
+			if id == req.ID {
+				tm.order = append(tm.order[:i], tm.order[i+1:]...)
+				break
+			}
+		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

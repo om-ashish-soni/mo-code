@@ -190,6 +190,14 @@ func (e *Engine) runLoop(
 	ch chan<- Event,
 ) {
 	defer close(ch)
+	// Guarantee the task leaves StateRunning even if a panic or early return occurs.
+	defer func() {
+		e.mu.Lock()
+		if ts, ok := e.tasks[taskID]; ok && ts.info.State == StateRunning {
+			ts.info.State = StateFailed
+		}
+		e.mu.Unlock()
+	}()
 
 	toolDefs := dispatcher.ToolDefs()
 

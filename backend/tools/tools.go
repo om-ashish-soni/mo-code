@@ -172,7 +172,7 @@ func DefaultDispatcherWithOpts(workingDir string, opts DispatcherOpts) *Dispatch
 	}
 
 	d.Register(NewGitStatus(workingDir))
-	d.Register(NewGitDiff(workingDir))
+	d.Register(NewGitDiff(workingDir, opts.Proot))
 	d.Register(NewGitLog(workingDir))
 	d.Register(NewGitAdd(workingDir))
 	d.Register(NewGitCommit(workingDir))

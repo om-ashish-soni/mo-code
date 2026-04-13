@@ -123,16 +123,17 @@ func main() {
 	prootBin := os.Getenv("MOCODE_PROOT_BIN")
 	prootRootFS := os.Getenv("MOCODE_PROOT_ROOTFS")
 	prootProjects := os.Getenv("MOCODE_PROOT_PROJECTS")
+	prootLoader := os.Getenv("MOCODE_PROOT_LOADER")
 	if prootBin != "" && prootRootFS != "" {
 		if prootProjects == "" {
 			prootProjects = filepath.Join(workingDir, "projects")
 		}
 		var err error
-		proot, err = runtime.NewProotRuntime(prootBin, prootRootFS, prootProjects)
+		proot, err = runtime.NewProotRuntime(prootBin, prootRootFS, prootProjects, prootLoader)
 		if err != nil {
 			log.Printf("warning: proot runtime disabled: %v", err)
 		} else {
-			log.Printf("proot runtime: bin=%s rootfs=%s projects=%s", prootBin, prootRootFS, prootProjects)
+			log.Printf("proot runtime: bin=%s rootfs=%s projects=%s loader=%s", prootBin, prootRootFS, prootProjects, prootLoader)
 			// Install essential packages in background (first launch only).
 			go func() {
 				essentials := []string{"git", "nodejs", "npm", "python3", "curl", "openssh"}
