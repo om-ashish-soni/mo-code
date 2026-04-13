@@ -59,10 +59,12 @@ class RuntimeBootstrap(private val context: Context) {
      */
     fun bootstrap(onProgress: ((String, Int) -> Unit)? = null): RuntimePaths? {
         val runtimeDir = File(context.filesDir, RUNTIME_DIR)
-        val prootFile = File(runtimeDir, "proot")
         val rootfsDir = File(runtimeDir, "rootfs")
         val versionFile = File(runtimeDir, "RUNTIME_VERSION")
         val projectsDir = File(context.getExternalFilesDir(null) ?: context.filesDir, "projects")
+
+        // proot binary lives in nativeLibraryDir (executable on Android's noexec /data).
+        val prootFile = File(context.applicationInfo.nativeLibraryDir, "libproot.so")
 
         fun progress(msg: String, pct: Int) {
             bootstrapProgress = msg
@@ -97,28 +99,14 @@ class RuntimeBootstrap(private val context: Context) {
             runtimeDir.mkdirs()
             projectsDir.mkdirs()
 
-            // Load expected checksums.
-            val checksums = loadChecksums()
-
-            // --- Extract proot binary (5%) ---
-            progress("Extracting proot binary...", 5)
-            context.assets.open(PROOT_ASSET).use { input ->
-                FileOutputStream(prootFile).use { output ->
-                    input.copyTo(output)
-                }
+            // proot binary is bundled as a native lib (libproot.so) in nativeLibraryDir.
+            // No extraction needed — Android handles it and the directory is executable.
+            if (!prootFile.exists()) {
+                Log.e(TAG, "proot native lib not found at ${prootFile.absolutePath}")
+                return null
             }
-            prootFile.setExecutable(true, false)
-
-            // Verify proot checksum.
-            val prootExpected = checksums["proot-arm64"]
-            if (prootExpected != null) {
-                val actual = sha256(prootFile)
-                if (actual != prootExpected) {
-                    Log.e(TAG, "proot checksum mismatch: expected=$prootExpected actual=$actual")
-                    return null
-                }
-            }
-            progress("proot extracted", 10)
+            Log.i(TAG, "proot binary: ${prootFile.absolutePath}")
+            progress("proot ready", 10)
 
             // --- Extract Alpine rootfs tar.gz (10-90%) ---
             progress("Extracting Alpine Linux rootfs...", 15)
@@ -129,17 +117,32 @@ class RuntimeBootstrap(private val context: Context) {
             }
             rootfsDir.mkdirs()
 
-            // Copy tar.gz to a temp file so we can extract with system tar.
+            // Copy rootfs to a temp file so we can extract with system tar.
+            // AAPT may decompress .tar.gz to .tar, so try both names.
             val tmpTarGz = File(runtimeDir, "rootfs.tar.gz")
-            context.assets.open(ROOTFS_ASSET).use { input ->
-                FileOutputStream(tmpTarGz).use { output ->
-                    input.copyTo(output)
+            val isGzipped = try {
+                context.assets.open(ROOTFS_ASSET).use { input ->
+                    FileOutputStream(tmpTarGz).use { output ->
+                        input.copyTo(output)
+                    }
                 }
+                true
+            } catch (_: java.io.FileNotFoundException) {
+                // AAPT stripped the .gz — try without it
+                val fallback = ROOTFS_ASSET.removeSuffix(".gz")
+                Log.i(TAG, "Asset $ROOTFS_ASSET not found, trying $fallback")
+                context.assets.open(fallback).use { input ->
+                    FileOutputStream(tmpTarGz).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                false
             }
             progress("Extracting rootfs...", 30)
 
             // Use system tar to extract (available on Android).
-            val proc = ProcessBuilder("tar", "xzf", tmpTarGz.absolutePath, "-C", rootfsDir.absolutePath)
+            val tarFlag = if (isGzipped) "xzf" else "xf"
+            val proc = ProcessBuilder("tar", tarFlag, tmpTarGz.absolutePath, "-C", rootfsDir.absolutePath)
                 .redirectErrorStream(true)
                 .start()
             val tarOutput = proc.inputStream.bufferedReader().readText()
@@ -210,7 +213,7 @@ class RuntimeBootstrap(private val context: Context) {
         val runtimeDir = File(context.filesDir, RUNTIME_DIR)
         val projectsDir = File(context.getExternalFilesDir(null) ?: context.filesDir, "projects")
         return RuntimePaths(
-            prootBin = File(runtimeDir, "proot").absolutePath,
+            prootBin = File(context.applicationInfo.nativeLibraryDir, "libproot.so").absolutePath,
             rootFS = File(runtimeDir, "rootfs").absolutePath,
             projectsDir = projectsDir.absolutePath,
         )

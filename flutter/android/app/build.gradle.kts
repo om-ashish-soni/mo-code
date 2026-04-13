@@ -28,6 +28,10 @@ android {
         jvmTarget = JavaVersion.VERSION_17.toString()
     }
 
+    androidResources {
+        noCompress += listOf("gz", "tar.gz", "so")
+    }
+
     defaultConfig {
         applicationId = "io.github.omashishsoni.mocode"
         minSdk = 24

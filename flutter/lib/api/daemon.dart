@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'app_logger.dart';
+
+final _log = AppLogger.instance;
 
 class OpenCodeAPI {
   static const _defaultPort = 19280;
@@ -56,14 +58,14 @@ class OpenCodeAPI {
         final port = int.tryParse(content.trim());
         if (port != null && port > 0) {
           _baseUrl = 'http://127.0.0.1:$port';
-          debugPrint('Discovered daemon on port $port from $path');
+          _log.info('app', 'Discovered daemon on port $port from $path');
           return;
         }
       } catch (_) {
         // file doesn't exist, try next
       }
     }
-    debugPrint('No port file found, using default port $_defaultPort');
+    _log.warn('app', 'No port file found, using default port $_defaultPort');
   }
 
   Map<String, String> get _authHeaders {
@@ -91,8 +93,11 @@ class OpenCodeAPI {
         await Future.delayed(const Duration(seconds: 2));
       }
       return _daemonManagedLocally;
+    } on PlatformException catch (e) {
+      _log.error('app', 'Failed to start daemon service: ${e.message}');
+      return false;
     } on MissingPluginException {
-      debugPrint('Daemon platform channel not available');
+      _log.warn('app', 'Daemon platform channel not available (non-Android?)');
       return false;
     }
   }
@@ -130,38 +135,48 @@ class OpenCodeAPI {
   }
 
   Future<void> connect() async {
+    _log.info('app', 'Connecting to daemon...');
+
     // On Android, start the daemon if it's not already running.
     if (Platform.isAndroid) {
       final running = await isDaemonRunning();
       if (!running) {
+        _log.info('app', 'Daemon not running, starting foreground service...');
         await startDaemon();
+      } else {
+        _log.info('app', 'Daemon already running');
       }
       // Try to get port from the service first.
       final servicePort = await getDaemonPort();
       if (servicePort > 0) {
         _baseUrl = 'http://127.0.0.1:$servicePort';
-        debugPrint('Using daemon port from service: $servicePort');
+        _log.info('app', 'Using daemon port from service: $servicePort');
       } else {
+        _log.warn('app', 'Service returned port 0, discovering from port file...');
         await discoverPort();
       }
     } else {
       await discoverPort();
     }
 
+    _log.info('http', 'Health check → $_baseUrl/api/health');
     try {
       final health = await fetchHealth();
       if (health != null && (health['healthy'] == true || health['status'] == 'ok')) {
         _connected = true;
         _connectionController.add(true);
         _lastError = null;
+        _log.info('http', 'Health check passed ✓');
         _startEventStream();
       } else {
+        _log.error('http', 'Health check returned unhealthy: $health');
         throw Exception('Server not healthy');
       }
     } catch (e) {
       _connected = false;
       _connectionController.add(false);
       _lastError = e.toString();
+      _log.error('http', 'Connection failed: $e');
       rethrow;
     }
   }
@@ -179,6 +194,7 @@ class OpenCodeAPI {
 
     try {
       final wsUrl = '${_baseUrl.replaceFirst('http', 'ws')}/ws';
+      _log.info('ws', 'Connecting to $wsUrl');
       _eventChannel = WebSocketChannel.connect(Uri.parse(wsUrl));
 
       _eventSubscription = _eventChannel!.stream.listen(
@@ -186,33 +202,46 @@ class OpenCodeAPI {
           _wsReconnectAttempt = 0; // Reset on successful data.
           try {
             final decoded = jsonDecode(data as String) as Map<String, dynamic>;
+            final type = decoded['type'] as String? ?? '';
+            // Log important events (skip noisy stream chunks)
+            if (type == 'task.complete') {
+              _log.info('task', 'Task completed: ${decoded['task_id']}');
+            } else if (type == 'task.failed') {
+              final payload = decoded['payload'] as Map<String, dynamic>? ?? {};
+              _log.error('task', 'Task failed: ${payload['error'] ?? decoded['task_id']}');
+            } else if (type == 'error') {
+              final payload = decoded['payload'] as Map<String, dynamic>? ?? {};
+              _log.error('ws', 'Server error: ${payload['message'] ?? payload}');
+            } else if (type == 'config.current') {
+              _log.info('app', 'Config updated: provider=${(decoded['payload'] as Map?)?['active_provider']}');
+            }
             _messagesController.add(decoded);
           } catch (e) {
-            debugPrint('Event parse error: $e');
+            _log.error('ws', 'Event parse error: $e');
           }
         },
         onError: (e) {
-          debugPrint('Event stream error: $e');
+          _log.error('ws', 'Stream error: $e');
           _connected = false;
           _connectionController.add(false);
           _scheduleWsReconnect();
         },
         onDone: () {
-          debugPrint('Event stream closed');
+          _log.warn('ws', 'Stream closed');
           _connected = false;
           _connectionController.add(false);
           _scheduleWsReconnect();
         },
       );
     } catch (e) {
-      debugPrint('Failed to start event stream: $e');
+      _log.error('ws', 'Failed to start event stream: $e');
       _scheduleWsReconnect();
     }
   }
 
   void _scheduleWsReconnect() {
     if (_wsReconnectAttempt >= _wsMaxReconnectAttempts) {
-      debugPrint('WebSocket: max reconnect attempts reached');
+      _log.error('ws', 'Max reconnect attempts reached ($_wsMaxReconnectAttempts). Giving up.');
       return;
     }
     _wsReconnectTimer?.cancel();
@@ -222,7 +251,7 @@ class OpenCodeAPI {
       seconds: (1 << (_wsReconnectAttempt - 1))
           .clamp(1, _wsMaxReconnectDelay.inSeconds),
     );
-    debugPrint('WebSocket: reconnecting in ${delaySec.inSeconds}s (attempt $_wsReconnectAttempt)');
+    _log.info('ws', 'Reconnecting in ${delaySec.inSeconds}s (attempt $_wsReconnectAttempt/$_wsMaxReconnectAttempts)');
     _wsReconnectTimer = Timer(delaySec, () async {
       // Verify daemon is still healthy before reconnecting.
       final health = await fetchHealth();
@@ -246,10 +275,11 @@ class OpenCodeAPI {
         return jsonDecode(resp.body) as Map<String, dynamic>;
       }
       _lastError = 'Health check returned ${resp.statusCode}';
+      _log.error('http', _lastError!);
       return null;
     } catch (e) {
       _lastError = 'Health check failed: $e';
-      debugPrint(_lastError!);
+      _log.error('http', _lastError!);
       return null;
     }
   }
@@ -270,7 +300,7 @@ class OpenCodeAPI {
       return null;
     } catch (e) {
       _lastError = 'Create session failed: $e';
-      debugPrint(_lastError!);
+      _log.error('http', _lastError!);
       return null;
     }
   }
@@ -294,7 +324,7 @@ class OpenCodeAPI {
       return null;
     } catch (e) {
       _lastError = 'Send message failed: $e';
-      debugPrint(_lastError!);
+      _log.error('http', _lastError!);
       return null;
     }
   }
@@ -312,7 +342,7 @@ class OpenCodeAPI {
       return resp.statusCode == 204 ? {'status': 'queued'} : null;
     } catch (e) {
       _lastError = 'Send async message failed: $e';
-      debugPrint(_lastError!);
+      _log.error('http', _lastError!);
       return null;
     }
   }
@@ -333,7 +363,7 @@ class OpenCodeAPI {
       }
       return null;
     } catch (e) {
-      debugPrint('Get file content failed: $e');
+      _log.error('http', 'Get file content failed: $e');
       return null;
     }
   }
@@ -354,7 +384,7 @@ class OpenCodeAPI {
       }
       return null;
     } catch (e) {
-      debugPrint('Find files failed: $e');
+      _log.error('http', 'Find files failed: $e');
       return null;
     }
   }
@@ -375,7 +405,7 @@ class OpenCodeAPI {
       }
       return null;
     } catch (e) {
-      debugPrint('Find failed: $e');
+      _log.error('http', 'Find failed: $e');
       return null;
     }
   }
@@ -392,7 +422,7 @@ class OpenCodeAPI {
       }
       return null;
     } catch (e) {
-      debugPrint('List sessions failed: $e');
+      _log.error('http', 'List sessions failed: $e');
       return null;
     }
   }
@@ -444,7 +474,7 @@ class OpenCodeAPI {
       }
       return null;
     } catch (e) {
-      debugPrint('Fetch runtime status failed: $e');
+      _log.error('http', 'Fetch runtime status failed: $e');
       return null;
     }
   }
@@ -464,7 +494,7 @@ class OpenCodeAPI {
       return null;
     } catch (e) {
       _lastError = 'Fetch config failed: $e';
-      debugPrint(_lastError!);
+      _log.error('http', _lastError!);
       return null;
     }
   }
@@ -482,7 +512,7 @@ class OpenCodeAPI {
       return null;
     } catch (e) {
       _lastError = 'Fetch status failed: $e';
-      debugPrint(_lastError!);
+      _log.error('http', _lastError!);
       return null;
     }
   }
@@ -499,7 +529,7 @@ class OpenCodeAPI {
       case 'provider.switch':
         return _postJson('/api/provider/switch', payload);
       default:
-        debugPrint('sendWsMessage: unsupported type $type');
+        _log.warn('ws', 'sendWsMessage: unsupported type $type');
         return false;
     }
   }
@@ -516,7 +546,7 @@ class OpenCodeAPI {
       return false;
     } catch (e) {
       _lastError = 'POST $path failed: $e';
-      debugPrint(_lastError!);
+      _log.error('http', _lastError!);
       return false;
     }
   }
@@ -524,19 +554,22 @@ class OpenCodeAPI {
   // --- Copilot Device Auth ---
 
   Future<Map<String, dynamic>?> startCopilotAuth() async {
+    _log.info('http', 'POST /api/auth/copilot/device');
     try {
       final resp = await http.post(
         Uri.parse('$_baseUrl/api/auth/copilot/device'),
         headers: _authHeaders,
       );
       if (resp.statusCode == 200) {
+        _log.info('http', 'Copilot device auth started');
         return jsonDecode(resp.body) as Map<String, dynamic>;
       }
-      _lastError = 'Start copilot auth: HTTP ${resp.statusCode}';
+      _lastError = 'Start copilot auth: HTTP ${resp.statusCode} — ${resp.body}';
+      _log.error('http', _lastError!);
       return null;
     } catch (e) {
       _lastError = 'Start copilot auth failed: $e';
-      debugPrint(_lastError!);
+      _log.error('http', _lastError!);
       return null;
     }
   }
@@ -551,11 +584,12 @@ class OpenCodeAPI {
       if (resp.statusCode == 200) {
         return jsonDecode(resp.body) as Map<String, dynamic>;
       }
-      _lastError = 'Poll copilot auth: HTTP ${resp.statusCode}';
+      _lastError = 'Poll copilot auth: HTTP ${resp.statusCode} — ${resp.body}';
+      _log.error('http', _lastError!);
       return null;
     } catch (e) {
       _lastError = 'Poll copilot auth failed: $e';
-      debugPrint(_lastError!);
+      _log.error('http', _lastError!);
       return null;
     }
   }
@@ -565,14 +599,14 @@ class OpenCodeAPI {
   /// Send a JSON message over the active WebSocket connection.
   bool sendWsJson(Map<String, dynamic> message) {
     if (_eventChannel == null) {
-      debugPrint('sendWsJson: no WebSocket connection');
+      _log.warn('ws', 'sendWsJson: no WebSocket connection');
       return false;
     }
     try {
       _eventChannel!.sink.add(jsonEncode(message));
       return true;
     } catch (e) {
-      debugPrint('sendWsJson failed: $e');
+      _log.error('ws', 'sendWsJson failed: $e');
       return false;
     }
   }
@@ -582,6 +616,7 @@ class OpenCodeAPI {
   String? startTask(String prompt, {String? provider, String? workingDir, String? taskId}) {
     _msgCounter++;
     final id = taskId ?? 'msg-$_msgCounter-${DateTime.now().millisecondsSinceEpoch}';
+    _log.info('task', 'Starting task $id: "${prompt.length > 60 ? '${prompt.substring(0, 60)}...' : prompt}"');
     final sent = sendWsJson({
       'type': 'task.start',
       'id': id,

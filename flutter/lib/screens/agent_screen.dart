@@ -168,6 +168,12 @@ class AgentScreenState extends State<AgentScreen> {
     _attemptConnect();
   }
 
+  void _removeThinkingLines() {
+    setState(() {
+      _lines.removeWhere((l) => l.type == TerminalLineType.agentThinking);
+    });
+  }
+
   void _handleEvent(Map<String, dynamic> event) {
     if (!mounted) return;
     final type = event['type'] as String? ?? '';
@@ -175,7 +181,8 @@ class AgentScreenState extends State<AgentScreen> {
 
     switch (type) {
       case 'agent.stream':
-        // Streaming content from the agent
+        // Streaming content from the agent — remove "Processing..." on first content
+        _removeThinkingLines();
         if (payload is Map<String, dynamic>) {
           final kind = payload['kind'] as String? ?? '';
           final content = payload['content'] as String? ?? '';
@@ -234,6 +241,7 @@ class AgentScreenState extends State<AgentScreen> {
         }
         break;
       case 'task.complete':
+        _removeThinkingLines();
         _addLine(TerminalLine(type: TerminalLineType.separator));
         if (payload is Map<String, dynamic>) {
           final summary = payload['summary'] as String? ?? 'Task completed';
@@ -252,6 +260,7 @@ class AgentScreenState extends State<AgentScreen> {
         });
         break;
       case 'task.failed':
+        _removeThinkingLines();
         if (payload is Map<String, dynamic>) {
           final error = payload['error'] as String? ?? 'Unknown error';
           _addLine(TerminalLine(type: TerminalLineType.error, content: 'Task failed: $error'));

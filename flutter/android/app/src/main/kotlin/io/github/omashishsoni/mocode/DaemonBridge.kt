@@ -1,26 +1,16 @@
 package io.github.omashishsoni.mocode
 
+import android.app.ForegroundServiceStartNotAllowedException
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 
-/**
- * Platform channel bridge between Dart and the DaemonService.
- *
- * Channel: "io.mocode/daemon"
- *
- * Methods:
- *   startDaemon()        → starts the foreground service + Go process
- *   stopDaemon()         → stops the service and kills the process
- *   isRunning()          → returns bool
- *   getPort()            → returns int (0 if not running)
- *   getPortFile()        → returns String path to the port file
- *   getRuntimeStatus()   → returns Map with runtime bootstrap info
- *   resetRuntime()       → wipes and re-extracts the proot + Alpine rootfs
- */
 class DaemonBridge(
     private val context: Context,
     messenger: BinaryMessenger,
@@ -28,9 +18,13 @@ class DaemonBridge(
 
     companion object {
         const val CHANNEL = "io.mocode/daemon"
+        const val TAG = "DaemonBridge"
+        const val MAX_START_RETRIES = 3
+        const val RETRY_DELAY_MS = 500L
     }
 
     private val channel = MethodChannel(messenger, CHANNEL)
+    private val handler = Handler(Looper.getMainLooper())
 
     init {
         channel.setMethodCallHandler(this)
@@ -39,13 +33,7 @@ class DaemonBridge(
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "startDaemon" -> {
-                val intent = Intent(context, DaemonService::class.java)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    context.startForegroundService(intent)
-                } else {
-                    context.startService(intent)
-                }
-                result.success(true)
+                startDaemonWithRetry(0, result)
             }
             "stopDaemon" -> {
                 context.stopService(Intent(context, DaemonService::class.java))
@@ -96,6 +84,30 @@ class DaemonBridge(
                 }.start()
             }
             else -> result.notImplemented()
+        }
+    }
+
+    private fun startDaemonWithRetry(attempt: Int, result: MethodChannel.Result) {
+        val intent = Intent(context, DaemonService::class.java)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+            Log.i(TAG, "Foreground service started (attempt ${attempt + 1})")
+            result.success(true)
+        } catch (e: Exception) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                e is ForegroundServiceStartNotAllowedException &&
+                attempt < MAX_START_RETRIES
+            ) {
+                Log.w(TAG, "FG service not allowed yet (attempt ${attempt + 1}/$MAX_START_RETRIES), retrying in ${RETRY_DELAY_MS}ms")
+                handler.postDelayed({ startDaemonWithRetry(attempt + 1, result) }, RETRY_DELAY_MS)
+            } else {
+                Log.e(TAG, "Failed to start daemon service after ${attempt + 1} attempts", e)
+                result.error("start_failed", e.message, null)
+            }
         }
     }
 

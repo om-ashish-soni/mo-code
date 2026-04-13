@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../api/daemon.dart';
+import '../api/app_logger.dart';
 import '../theme/colors.dart';
 import '../widgets/shimmer_loading.dart';
 import '../widgets/connection_banner.dart';
@@ -145,6 +147,11 @@ class _ConfigScreenState extends State<ConfigScreen> {
         title: Text('Config', style: AppTheme.uiFont(fontSize: 18, color: AppColors.white, fontWeight: FontWeight.w600)),
         actions: [
           IconButton(
+            icon: const Icon(Icons.terminal_rounded, color: AppColors.textMuted),
+            onPressed: _showLogsSheet,
+            tooltip: 'View Logs',
+          ),
+          IconButton(
             icon: const Icon(Icons.refresh_rounded, color: AppColors.textMuted),
             onPressed: _loadConfig,
             tooltip: 'Refresh',
@@ -188,7 +195,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
         _buildRuntimeSection(),
         const SizedBox(height: AppSpacing.xl),
         _buildLogsSection(),
-        const SizedBox(height: AppSpacing.xxxl),
+        const SizedBox(height: 100),
       ],
     );
   }
@@ -529,16 +536,50 @@ class _ConfigScreenState extends State<ConfigScreen> {
               ),
               child: Column(
                 children: [
-                  Text('Enter this code at github.com/login/device:', style: AppTheme.uiFont(fontSize: 12, color: AppColors.textMuted)),
+                  Text('1. Copy this code:', style: AppTheme.uiFont(fontSize: 13, color: AppColors.textMuted)),
                   const SizedBox(height: AppSpacing.md),
-                  SelectableText(
-                    _copilotUserCode!,
-                    style: AppTheme.codeFont(fontSize: 28, color: AppColors.purpleLight, fontWeight: FontWeight.w700),
+                  GestureDetector(
+                    onTap: () {
+                      Clipboard.setData(ClipboardData(text: _copilotUserCode!));
+                      _showToast('Code copied!');
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl, vertical: AppSpacing.md),
+                      decoration: BoxDecoration(
+                        color: AppColors.panel,
+                        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                        border: Border.all(color: AppColors.purple.withAlpha(80)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _copilotUserCode!,
+                            style: AppTheme.codeFont(fontSize: 32, color: AppColors.purpleLight, fontWeight: FontWeight.w700),
+                          ),
+                          const SizedBox(width: AppSpacing.md),
+                          const Icon(Icons.copy_rounded, size: 18, color: AppColors.textMuted),
+                        ],
+                      ),
+                    ),
                   ),
+                  const SizedBox(height: AppSpacing.lg),
+                  Text('2. Paste it on GitHub:', style: AppTheme.uiFont(fontSize: 13, color: AppColors.textMuted)),
                   const SizedBox(height: AppSpacing.md),
-                  Text(
-                    _copilotVerificationUri ?? 'https://github.com/login/device',
-                    style: AppTheme.codeFont(fontSize: 11, color: AppColors.textMuted),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        final url = _copilotVerificationUri ?? 'https://github.com/login/device';
+                        launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                      },
+                      icon: const Icon(Icons.open_in_browser_rounded, size: 18),
+                      label: const Text('Open GitHub'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.surface,
+                        foregroundColor: AppColors.purpleLight,
+                      ),
+                    ),
                   ),
                   const SizedBox(height: AppSpacing.lg),
                   const SizedBox(
@@ -577,7 +618,9 @@ class _ConfigScreenState extends State<ConfigScreen> {
 
     if (deviceResp == null) {
       setState(() => _copilotAuthInProgress = false);
-      _showToast('Failed to start Copilot auth', isError: true);
+      final err = api.lastError ?? 'unknown error';
+      AppLogger.instance.error('copilot', 'Auth start failed: $err');
+      _showToast('Failed to start Copilot auth: $err', isError: true);
       return;
     }
 
@@ -601,10 +644,14 @@ class _ConfigScreenState extends State<ConfigScreen> {
       if (!mounted || !_copilotAuthInProgress) return;
 
       final result = await api.pollCopilotAuth(_copilotDeviceCode!);
-      if (result == null) continue;
+      if (result == null) {
+        AppLogger.instance.warn('copilot', 'Poll attempt ${i + 1} returned null: ${api.lastError}');
+        continue;
+      }
 
       final status = result['status'] as String?;
       if (status == 'success') {
+        AppLogger.instance.info('copilot', 'Auth succeeded!');
         setState(() {
           _copilotAuthInProgress = false;
           _copilotUserCode = null;
@@ -614,12 +661,14 @@ class _ConfigScreenState extends State<ConfigScreen> {
         _showToast('Copilot authenticated!');
         return;
       } else if (status == 'failed') {
+        final err = result['error'] ?? 'unknown';
+        AppLogger.instance.error('copilot', 'Auth failed: $err');
         setState(() {
           _copilotAuthInProgress = false;
           _copilotUserCode = null;
           _copilotDeviceCode = null;
         });
-        _showToast('Auth failed: ${result['error'] ?? 'unknown'}', isError: true);
+        _showToast('Auth failed: $err', isError: true);
         return;
       }
       // pending — keep polling
@@ -800,11 +849,11 @@ class _ConfigScreenState extends State<ConfigScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Daemon Logs',
+          Text('Logs',
               style: AppTheme.uiFont(fontSize: 11, color: AppColors.textMuted, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
           const SizedBox(height: AppSpacing.md),
           Text(
-            'View Go daemon output for debugging connection or runtime issues.',
+            'View app and daemon logs for debugging connection, runtime, or API issues.',
             style: AppTheme.uiFont(fontSize: 12, color: AppColors.textMuted),
           ),
           const SizedBox(height: AppSpacing.lg),
@@ -827,10 +876,12 @@ class _ConfigScreenState extends State<ConfigScreen> {
 
   Future<void> _showLogsSheet() async {
     final api = context.read<OpenCodeAPI>();
-    String logs = 'Loading...';
 
-    final result = await api.getDaemonLogs();
-    logs = result ?? 'No logs available (non-Android platform or daemon not started)';
+    // Fetch daemon logs (file-based, Android only)
+    final daemonLogs = await api.getDaemonLogs() ?? 'No daemon logs (non-Android or daemon not started)';
+
+    // App logs from in-memory buffer
+    final appLogs = AppLogger.instance.text.isEmpty ? 'No app logs yet' : AppLogger.instance.text;
 
     if (!mounted) return;
 
@@ -841,68 +892,117 @@ class _ConfigScreenState extends State<ConfigScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (ctx) => DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.7,
-        minChildSize: 0.3,
-        maxChildSize: 0.95,
-        builder: (ctx, scrollController) => Column(
-          children: [
-            // Handle bar
-            Container(
-              margin: const EdgeInsets.symmetric(vertical: 8),
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppColors.textDisabled,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            // Header with copy button
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
-              child: Row(
-                children: [
-                  Text('Daemon Logs',
-                      style: AppTheme.uiFont(fontSize: 16, color: AppColors.white, fontWeight: FontWeight.w600)),
-                  const Spacer(),
-                  IconButton(
-                    icon: const Icon(Icons.copy_rounded, size: 18, color: AppColors.textMuted),
-                    tooltip: 'Copy to clipboard',
-                    onPressed: () {
-                      Clipboard.setData(ClipboardData(text: logs));
-                      ScaffoldMessenger.of(ctx).showSnackBar(
-                        SnackBar(
-                          content: Text('Logs copied to clipboard',
-                              style: AppTheme.uiFont(fontSize: 13, color: AppColors.white)),
-                          backgroundColor: AppColors.panel,
-                          duration: const Duration(seconds: 2),
-                        ),
-                      );
-                    },
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close_rounded, size: 20, color: AppColors.textMuted),
-                    onPressed: () => Navigator.pop(ctx),
-                  ),
-                ],
-              ),
-            ),
-            const Divider(color: AppColors.border, height: 1),
-            // Logs content
-            Expanded(
-              child: SingleChildScrollView(
-                controller: scrollController,
-                reverse: true, // scroll to bottom (latest logs)
-                padding: const EdgeInsets.all(AppSpacing.lg),
-                child: SelectableText(
-                  logs,
-                  style: AppTheme.codeFont(fontSize: 11, color: AppColors.green),
+      builder: (ctx) => DefaultTabController(
+        length: 2,
+        child: SizedBox(
+          height: MediaQuery.of(ctx).size.height * 0.8,
+          child: Column(
+            children: [
+              // Handle bar
+              Container(
+                margin: const EdgeInsets.symmetric(vertical: 8),
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.textDisabled,
+                  borderRadius: BorderRadius.circular(2),
                 ),
               ),
-            ),
-          ],
+              // Header
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.xs),
+                child: Row(
+                  children: [
+                    Text('Logs',
+                        style: AppTheme.uiFont(fontSize: 16, color: AppColors.white, fontWeight: FontWeight.w600)),
+                    const SizedBox(width: AppSpacing.sm),
+                    Text('${AppLogger.instance.length} entries',
+                        style: AppTheme.codeFont(fontSize: 11, color: AppColors.textMuted)),
+                    const Spacer(),
+                    IconButton(
+                      icon: const Icon(Icons.copy_rounded, size: 18, color: AppColors.textMuted),
+                      tooltip: 'Copy all logs',
+                      onPressed: () {
+                        final combined = '=== APP LOGS ===\n$appLogs\n\n=== DAEMON LOGS ===\n$daemonLogs';
+                        Clipboard.setData(ClipboardData(text: combined));
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          SnackBar(
+                            content: Text('All logs copied to clipboard',
+                                style: AppTheme.uiFont(fontSize: 13, color: AppColors.white)),
+                            backgroundColor: AppColors.panel,
+                            duration: const Duration(seconds: 2),
+                          ),
+                        );
+                      },
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 20, color: AppColors.textMuted),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ],
+                ),
+              ),
+              // Tab bar
+              TabBar(
+                indicatorColor: AppColors.purple,
+                labelColor: AppColors.purpleLight,
+                unselectedLabelColor: AppColors.textMuted,
+                labelStyle: AppTheme.uiFont(fontSize: 13, fontWeight: FontWeight.w600),
+                unselectedLabelStyle: AppTheme.uiFont(fontSize: 13),
+                dividerColor: AppColors.border,
+                tabs: const [
+                  Tab(text: 'App'),
+                  Tab(text: 'Daemon'),
+                ],
+              ),
+              // Tab content — each tab gets its own scroll controller
+              Expanded(
+                child: TabBarView(
+                  children: [
+                    _buildLogContent(null, appLogs, _colorizeAppLogs),
+                    _buildLogContent(null, daemonLogs, null),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildLogContent(ScrollController? scrollController, String logs, Widget Function(String)? builder) {
+    return SingleChildScrollView(
+      controller: scrollController,
+      reverse: true,
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      child: builder != null ? builder(logs) : SelectableText(
+        logs,
+        style: AppTheme.codeFont(fontSize: 11, color: AppColors.green),
+      ),
+    );
+  }
+
+  Widget _colorizeAppLogs(String logs) {
+    final lines = logs.split('\n');
+    return SelectableText.rich(
+      TextSpan(
+        children: lines.map((line) {
+          Color color = AppColors.textSecondary;
+          if (line.contains('ERROR')) {
+            color = AppColors.red;
+          } else if (line.contains('WARN')) {
+            color = AppColors.amber;
+          } else if (line.contains('INFO')) {
+            color = AppColors.green;
+          } else if (line.contains('DEBUG')) {
+            color = AppColors.textMuted;
+          }
+          return TextSpan(
+            text: '$line\n',
+            style: AppTheme.codeFont(fontSize: 11, color: color),
+          );
+        }).toList(),
       ),
     );
   }
