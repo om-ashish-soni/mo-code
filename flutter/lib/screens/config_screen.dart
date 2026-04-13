@@ -186,6 +186,8 @@ class _ConfigScreenState extends State<ConfigScreen> {
         _buildWorkingDirSection(),
         const SizedBox(height: AppSpacing.xl),
         _buildRuntimeSection(),
+        const SizedBox(height: AppSpacing.xl),
+        _buildLogsSection(),
         const SizedBox(height: AppSpacing.xxxl),
       ],
     );
@@ -783,6 +785,124 @@ class _ConfigScreenState extends State<ConfigScreen> {
             child: Text(value, style: AppTheme.codeFont(fontSize: 12, color: AppColors.textPrimary)),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildLogsSection() {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      decoration: BoxDecoration(
+        color: AppColors.panel,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(color: AppColors.border, width: 0.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Daemon Logs',
+              style: AppTheme.uiFont(fontSize: 11, color: AppColors.textMuted, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            'View Go daemon output for debugging connection or runtime issues.',
+            style: AppTheme.uiFont(fontSize: 12, color: AppColors.textMuted),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _showLogsSheet,
+              icon: const Icon(Icons.terminal_rounded, size: 16),
+              label: const Text('View Logs'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.textPrimary,
+                side: const BorderSide(color: AppColors.border),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showLogsSheet() async {
+    final api = context.read<OpenCodeAPI>();
+    String logs = 'Loading...';
+
+    final result = await api.getDaemonLogs();
+    logs = result ?? 'No logs available (non-Android platform or daemon not started)';
+
+    if (!mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.background,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.7,
+        minChildSize: 0.3,
+        maxChildSize: 0.95,
+        builder: (ctx, scrollController) => Column(
+          children: [
+            // Handle bar
+            Container(
+              margin: const EdgeInsets.symmetric(vertical: 8),
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.textDisabled,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            // Header with copy button
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
+              child: Row(
+                children: [
+                  Text('Daemon Logs',
+                      style: AppTheme.uiFont(fontSize: 16, color: AppColors.white, fontWeight: FontWeight.w600)),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.copy_rounded, size: 18, color: AppColors.textMuted),
+                    tooltip: 'Copy to clipboard',
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: logs));
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                        SnackBar(
+                          content: Text('Logs copied to clipboard',
+                              style: AppTheme.uiFont(fontSize: 13, color: AppColors.white)),
+                          backgroundColor: AppColors.panel,
+                          duration: const Duration(seconds: 2),
+                        ),
+                      );
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded, size: 20, color: AppColors.textMuted),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(color: AppColors.border, height: 1),
+            // Logs content
+            Expanded(
+              child: SingleChildScrollView(
+                controller: scrollController,
+                reverse: true, // scroll to bottom (latest logs)
+                padding: const EdgeInsets.all(AppSpacing.lg),
+                child: SelectableText(
+                  logs,
+                  style: AppTheme.codeFont(fontSize: 11, color: AppColors.green),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -1,10 +1,11 @@
 # Mo-Code Checkpoint
 
 ## Last updated
-2026-04-13 by Claude (C3, FEAT-003 testing — COMPLETE)
+2026-04-13 by Claude (C2, daemon binary bundling + in-app logs viewer)
 
 ## Handoff note
-FEAT-002 proot+Alpine: COMPLETE. FEAT-003 session context continuity: ALL THREE CLAUDES COMPLETE (C1 Flutter, C2 Backend, C3 Testing).
+FEAT-002 proot+Alpine: COMPLETE. FEAT-003 session context continuity: ALL THREE CLAUDES COMPLETE.
+**USB debugging fix:** Go daemon binary was never bundled in APK assets — added cross-compile step and placed ARM64 binary at `assets/bin/arm64-v8a/mocode`. Added daemon log file + in-app "View Logs" button on Config screen.
 
 | Claude | Scope | Key files | Status |
 |--------|-------|-----------|--------|
@@ -17,7 +18,7 @@ FEAT-002 proot+Alpine: COMPLETE. FEAT-003 session context continuity: ALL THREE 
 **Build status:** `go build ./...`, `go test ./...`, `go vet ./...` all clean. `flutter analyze` clean (1 info-level lint).
 
 ## Current phase
-FEAT-003: Session Context Continuity — ALL COMPLETE (C1 Flutter, C2 Backend, C3 Testing). All tests pass with -race.
+FEAT-003: Session Context Continuity — ALL COMPLETE. Daemon bundling + logging fixed for on-device testing.
 
 ## FEAT-003: Session Context Continuity — PENDING
 **Bug:** `agent_screen.dart:430` generates new task ID per prompt → backend sees each as independent session → LLM has zero context from prior turns.
@@ -54,7 +55,24 @@ Files: `backend/api/server.go`, `backend/api/messages.go`, `backend/context/sess
 - [x] **Bug fix:** SessionStore.Get() returned mutable pointer → data race. Fixed to return snapshot copy with cloned Messages slice.
 Files: `backend/agent/e2e_test.go`, `backend/context/session_store_test.go`, `backend/context/compaction_test.go`, `backend/context/session_store.go`
 
-## FEAT-002: proot + Alpine Runtime — IN PROGRESS
+## Daemon Bundling + Logging — COMPLETE
+- [x] **Root cause found:** Go daemon binary was never placed in APK `assets/bin/arm64-v8a/mocode` → `DaemonService.extractBinary()` returned null → daemon never started → health check failed → "connection failed, server not healthy"
+- [x] Cross-compiled ARM64 binary: `GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build` (14MB static)
+- [x] Placed at `flutter/android/app/src/main/assets/bin/arm64-v8a/mocode` + VERSION file
+- [x] `DaemonService.kt` — daemon stdout/stderr now writes to `daemon.log` file (in addition to logcat)
+- [x] `DaemonBridge.kt` — added `getLogs` platform channel method (returns last 200 lines)
+- [x] `daemon.dart` — added `getDaemonLogs()` API method
+- [x] `config_screen.dart` — "Daemon Logs" section with "View Logs" button → draggable bottom sheet with monospace logs + copy to clipboard
+- [x] Binary is gitignored (14MB) — must run `scripts/build-go.sh --android` before building APK
+
+**Build steps for USB debugging:**
+```
+cd backend && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o ../flutter/android/app/src/main/assets/bin/arm64-v8a/mocode ./cmd/mocode
+echo "1.0.0" > ../flutter/android/app/src/main/assets/bin/VERSION
+cd ../flutter && flutter build apk --debug
+```
+
+## FEAT-002: proot + Alpine Runtime — COMPLETE
 ### C1 (Backend Go) — COMPLETE
 - [x] `backend/runtime/proot.go` — ProotRuntime struct, Exec(), InstallPackages(), IsReady(), RootFSSize()
 - [x] `backend/runtime/detect.go` — DetectProject() with 12 marker rules, AllPackages() dedup

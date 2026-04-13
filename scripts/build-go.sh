@@ -37,4 +37,11 @@ if [ "$1" = "--android" ]; then
     GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o "$PROJECT_DIR/bin/mocode-arm64" ./cmd/mocode
     echo "✓ ARM64 binary: $PROJECT_DIR/bin/mocode-arm64"
     echo "  Size: $(du -h "$PROJECT_DIR/bin/mocode-arm64" | cut -f1)"
+
+    # Place binary in Flutter assets for APK bundling.
+    ASSETS_DIR="$PROJECT_DIR/flutter/android/app/src/main/assets/bin/arm64-v8a"
+    mkdir -p "$ASSETS_DIR"
+    cp "$PROJECT_DIR/bin/mocode-arm64" "$ASSETS_DIR/mocode"
+    echo "1.0.0" > "$(dirname "$ASSETS_DIR")/VERSION"
+    echo "✓ Copied to Flutter assets: $ASSETS_DIR/mocode"
 fi
