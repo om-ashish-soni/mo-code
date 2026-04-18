@@ -39,6 +39,9 @@ android/app/release/
 **/assets/runtime/alpine-minirootfs.tar.gz
 **/assets/runtime/proot-arm64
 
+# Prebaked rootfs (built by scripts/build-prebaked-rootfs.sh, >80MB — ship via release)
+**/assets/rootfs/alpine-prebaked-arm64.tar.gz
+
 # Logs
 *.log
 daemon.log
