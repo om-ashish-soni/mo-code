@@ -5,7 +5,7 @@ import (
 )
 
 func TestSubagentDispatcher_Explore(t *testing.T) {
-	d := subagentDispatcher(SubagentExplore, "/tmp")
+	d := subagentDispatcher(SubagentExplore, "/tmp", nil, nil)
 	names := d.Names()
 
 	// Explore should only have read-only tools.
@@ -26,7 +26,7 @@ func TestSubagentDispatcher_Explore(t *testing.T) {
 }
 
 func TestSubagentDispatcher_General(t *testing.T) {
-	d := subagentDispatcher(SubagentGeneral, "/tmp")
+	d := subagentDispatcher(SubagentGeneral, "/tmp", nil, nil)
 	names := d.Names()
 
 	// General should have read/write/edit/shell/git tools but NOT task (no recursive subagents).

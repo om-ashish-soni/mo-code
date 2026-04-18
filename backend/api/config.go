@@ -25,16 +25,25 @@ type providerConfig struct {
 	Model  string `json:"model,omitempty"`
 }
 
-// NewConfigManager creates a ConfigManager with default provider entries.
+// NewConfigManager creates a ConfigManager with one entry per registered
+// provider in the registry. Falls back to the legacy claude/gemini/copilot
+// trio if the registry is nil (test paths).
 func NewConfigManager(registry *provider.Registry) *ConfigManager {
+	providers := map[string]*providerConfig{}
+	if registry != nil {
+		for _, name := range registry.Names() {
+			providers[name] = &providerConfig{}
+		}
+	}
+	if len(providers) == 0 {
+		providers["claude"] = &providerConfig{}
+		providers["gemini"] = &providerConfig{}
+		providers["copilot"] = &providerConfig{}
+	}
 	return &ConfigManager{
-		activeProvider: "claude",
-		providers: map[string]*providerConfig{
-			"claude":  {},
-			"gemini":  {},
-			"copilot": {},
-		},
-		registry: registry,
+		activeProvider: "copilot",
+		providers:      providers,
+		registry:       registry,
 	}
 }
 

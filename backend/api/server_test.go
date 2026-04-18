@@ -93,11 +93,11 @@ func TestConfigManagerSnapshot(t *testing.T) {
 	cm := NewConfigManager(registry)
 
 	snap := cm.Snapshot()
-	if snap.ActiveProvider != "claude" {
-		t.Fatalf("expected default provider claude, got %q", snap.ActiveProvider)
+	if snap.ActiveProvider != "copilot" {
+		t.Fatalf("expected default provider copilot, got %q", snap.ActiveProvider)
 	}
-	if _, ok := snap.Providers["claude"]; !ok {
-		t.Fatal("expected claude in providers")
+	if _, ok := snap.Providers["copilot"]; !ok {
+		t.Fatal("expected copilot in providers")
 	}
 }
 

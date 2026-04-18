@@ -145,6 +145,9 @@ func (d *Dispatcher) Names() []string {
 type DispatcherOpts struct {
 	Spawner SubagentSpawner
 	Proot   *runtime.ProotRuntime
+	// Qemu, when non-nil, takes precedence over Proot for shell_exec.
+	// Git tools still use Proot if set (qemu has no /projects bind yet).
+	Qemu *runtime.QemuRuntime
 }
 
 // DefaultDispatcher creates a Dispatcher with all standard tools registered.
@@ -164,10 +167,14 @@ func DefaultDispatcherWithOpts(workingDir string, opts DispatcherOpts) *Dispatch
 	d.Register(NewFileWrite(workingDir))
 	d.Register(NewFileList(workingDir))
 
-	// Shell: route through proot when configured, direct exec otherwise.
-	if opts.Proot != nil {
+	// Shell: prefer qemu (stronger isolation) when both are set; fall back
+	// to proot; fall back to direct host exec.
+	switch {
+	case opts.Qemu != nil:
+		d.Register(NewShellExecWithQemu(workingDir, opts.Qemu))
+	case opts.Proot != nil:
 		d.Register(NewShellExecWithProot(workingDir, opts.Proot))
-	} else {
+	default:
 		d.Register(NewShellExec(workingDir))
 	}
 

@@ -42,7 +42,7 @@ func DefaultModelForProvider(providerName string) string {
 	case "gemini":
 		return "gemini-2.0-flash"
 	case "copilot":
-		return "gpt-4o"
+		return "gpt-5-mini"
 	case "openrouter":
 		return "anthropic/claude-sonnet-4"
 	case "ollama":

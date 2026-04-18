@@ -168,6 +168,65 @@ class DaemonService : Service() {
             Log.i(TAG, "proot enabled: bin=${runtimePaths.prootBin} rootfs=${runtimePaths.rootFS}")
         }
 
+        // qemu-tcg bundle detection. The binary and its .so deps ship in
+        // jniLibs/arm64-v8a/ so they land in applicationInfo.nativeLibraryDir
+        // at install time — that directory has SELinux context apk_data_file,
+        // which untrusted_app IS allowed to mmap(PROT_EXEC) on Android 15.
+        // (filesDir is app_data_file, which is BLOCKED by W^X → the previous
+        // "qemu-system-aarch64: Permission denied" bug.)
+        //
+        // Kernel + initramfs + the qemu-exec-py.sh script live in
+        // filesDir/qemu-smoke/ since they're data (no exec needed).
+        //
+        // QEMU's DT_NEEDED uses versioned soname (e.g. libbz2.so.1.0) but AGP
+        // only packages files matching **/*.so, so versioned libs were staged
+        // with a trailing ".so" (libbz2.so.1.0 → libbz2.so.1.0.so). We build
+        // a shim dir of symlinks from the original soname → nativeLibraryDir
+        // so the dynamic linker can resolve names as qemu expects.
+        val nativeLibDir = File(applicationInfo.nativeLibraryDir)
+        val qemuBinary = File(nativeLibDir, "libqemu-system-aarch64.so")
+        val qemuBundle = File(filesDir, "qemu-smoke")
+        val qemuKernel = File(qemuBundle, "boot/vmlinuz-virt")
+        val qemuScript = File(qemuBundle, "qemu-exec-py.sh")
+        if (qemuBinary.exists() && qemuKernel.exists() && qemuScript.exists()) {
+            val shim = File(filesDir, "qemu-lib-shim")
+            if (!shim.isDirectory) shim.mkdirs()
+            // Clear any stale symlinks from prior install (binary paths change).
+            shim.listFiles()?.forEach { it.delete() }
+            // Build shim: for every file in nativeLibDir, symlink back under the
+            // name qemu expects. The "renamed .so.N.so" files get the trailing
+            // .so stripped; others keep their name.
+            var shimLinks = 0
+            nativeLibDir.listFiles()?.forEach { f ->
+                val base = f.name
+                val linkName = if (base.matches(Regex(".*\\.so\\.[0-9].*\\.so$"))) {
+                    // strip trailing ".so" to recover original soname
+                    base.removeSuffix(".so")
+                } else {
+                    base
+                }
+                val linkPath = File(shim, linkName).toPath()
+                try {
+                    java.nio.file.Files.createSymbolicLink(linkPath, f.toPath())
+                    shimLinks++
+                } catch (_: java.nio.file.FileAlreadyExistsException) { /* ok */ }
+                 catch (e: Exception) {
+                    Log.w(TAG, "qemu shim link failed for $base: ${e.message}")
+                }
+            }
+            env["MOCODE_QEMU_BUNDLE"] = qemuBundle.absolutePath
+            env["MOCODE_QEMU_PROJECTS"] = workDir
+            env["MOCODE_QEMU_BIN"] = qemuBinary.absolutePath
+            env["MOCODE_QEMU_LD_LIBRARY_PATH"] =
+                "${shim.absolutePath}:${nativeLibDir.absolutePath}:/system/lib64"
+            Log.i(TAG, "qemu-tcg enabled: bin=${qemuBinary.absolutePath} " +
+                "shim=${shim.absolutePath} links=$shimLinks")
+        } else {
+            Log.w(TAG, "qemu-tcg bundle incomplete: bin=${qemuBinary.exists()} " +
+                "kernel=${qemuKernel.exists()} script=${qemuScript.exists()} " +
+                "(staying on proot)")
+        }
+
         val pb = ProcessBuilder(binary.absolutePath)
         pb.directory(filesDir)
         pb.redirectErrorStream(true)

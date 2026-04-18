@@ -27,6 +27,7 @@ type Engine struct {
 	sessions   *agentctx.SessionStore
 	subagents  *SubagentRunner
 	proot      *runtime.ProotRuntime
+	qemu       *runtime.QemuRuntime
 
 	mu    sync.RWMutex
 	tasks map[string]*taskState
@@ -47,7 +48,15 @@ func NewEngine(registry provider.ProviderRegistry, workingDir string, sessions *
 		proot:      pr,
 		tasks:      make(map[string]*taskState),
 	}
-	e.subagents = NewSubagentRunner(registry, workingDir)
+	e.subagents = NewSubagentRunner(registry, workingDir, pr)
+	return e
+}
+
+// WithQemu attaches a *runtime.QemuRuntime to the Engine. When set, the shell
+// tool prefers qemu over proot. Safe to call once after NewEngine.
+func (e *Engine) WithQemu(q *runtime.QemuRuntime) *Engine {
+	e.qemu = q
+	e.subagents.qemu = q
 	return e
 }
 
@@ -75,11 +84,12 @@ func (e *Engine) Start(ctx context.Context, req TaskRequest) (<-chan Event, erro
 		return nil, fmt.Errorf("provider %q is not configured (missing API key)", providerName)
 	}
 
-	// Set up tools and context, with subagent spawner and optional proot runtime.
+	// Set up tools and context, with subagent spawner and optional proot/qemu runtime.
 	spawner := &subagentSpawnerAdapter{runner: e.subagents}
 	dispatcher := tools.DefaultDispatcherWithOpts(e.workingDir, tools.DispatcherOpts{
 		Spawner: spawner,
 		Proot:   e.proot,
+		Qemu:    e.qemu,
 	})
 	toolNames := dispatcher.Names()
 	systemPrompt := agentctx.BuildSystemPrompt(e.workingDir, toolNames, providerName)

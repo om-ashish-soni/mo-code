@@ -35,12 +35,62 @@
 ## Play Store — Blocked on Om
 - [x] Android scaffold, icon, signing, listing, privacy policy
 - [x] Release script ready (`./scripts/release.sh`) with pre-flight checks
-- [x] Version 1.1.0+2, compileSdk/targetSdk 35
+- [x] Version 1.2.0+3, compileSdk/targetSdk 35
 - [x] Store listing updated with R1/R2 features
 - [ ] Generate release keystore (Om — `keytool -genkey -v -keystore mocode-release.keystore -alias mocode -keyalg RSA -keysize 2048 -validity 10000`)
 - [ ] Create `flutter/android/key.properties` from `key.properties.example`
 - [ ] Build release AAB (Om — `./scripts/release.sh`)
 - [ ] Play Console upload + internal testing
+
+## FEAT-004 — Android 15 proot fix (v1.2.0)
+- [x] Root cause: SELinux W^X blocks mmap(PROT_EXEC) on app_data_file (ISSUE-010)
+- [x] Fix: memfd_create loader — loader.c patched, libproot-loader.so compiled (2.8KB)
+- [x] Diagnostics: Diagnose() in Go, /api/runtime/diagnose endpoint, degraded banner in Flutter
+- [x] Subagents receive proot runtime
+- [x] Docs: ISSUE-010 and FEAT-004 written
+- [ ] **Device test on Android 15 hardware** — run verify-loader.sh on OnePlus CPH2467
+- [ ] Commit all changes + tag v1.2.0
+
+## Sandbox Isolation Roadmap (3-tier)
+
+### v1.3 — Hardened proot (LANDED 2026-04-18)
+- [x] Strip host `/dev` and `/sys` binds in `runtime/proot.go`
+- [x] Allowlist safe `/dev/*` char devices (null/zero/full/random/urandom/tty)
+- [x] `IsolationTier()` returns `"proot-hardened"`; surfaced in `/api/runtime/diagnose`
+- [x] Flutter Config screen shows tier badge with "Why?" explanation dialog
+- [x] Policy regression test (`TestProotArgsIsolationPolicy`) blocks future re-binds of `/sys` or wholesale `/dev`
+- [ ] Add libseccomp deny-list inside the proot child (ptrace, process_vm_*, kexec_*, bpf, init_module, mount, pivot_root, keyctl) — deferred to v1.3.1
+- [ ] Materialize fake `/proc/cpuinfo /meminfo` files in rootfs as next /proc-leak mitigation step
+
+### v1.4 — Shizuku + bubblewrap tier (SCOPED — see FEAT-005)
+- [ ] Story 1: `runtime.Strategy` interface refactor
+- [ ] Story 2: Shizuku detection + IPC bridge (Kotlin + MethodChannel)
+- [ ] Story 3: Bundle bubblewrap + slirp4netns ARM64 in jniLibs
+- [ ] Story 4: `BwrapRuntime` Go implementation + seccomp BPF whitelist
+- [ ] Story 5: slirp4netns "internet only" networking
+- [ ] Story 6: Onboarding screen (Wireless Debugging → Shizuku pair)
+- [ ] Story 7: Capability detection + safe fallback to proot
+
+### v2.0 — AVF Microdroid tier (Pixel 7+ only, FEAT-006 to be written)
+- [ ] Detect Pixel + Android 14+ + `MANAGE_VIRTUAL_MACHINE` grant
+- [ ] Bundle Microdroid OR interop with pre-installed Linux Terminal app
+- [ ] Onboarding: `adb shell pm grant ... MANAGE_VIRTUAL_MACHINE`
+
+Background, sources, threat model: `docs/features/FEAT-005-shizuku-bubblewrap-tier.md` and `~/.secondmem/knowledge/engineering/android-sandbox-isolation-mocode.md`.
+
+## Linux Desktop Beta (next)
+- [ ] Fix APPLICATION_ID in flutter/linux/CMakeLists.txt
+- [ ] Hide bootstrap UI on non-Android (agent_screen.dart)
+- [ ] Hide proot/runtime section on non-Android (config_screen.dart)
+- [ ] Write scripts/run-linux.sh (daemon + flutter launcher)
+- [ ] flutter build linux --release → test end-to-end
+- [ ] Package tarball → GitHub Release
+
+## MO-63 — Static NDK binaries (permanent fix, future)
+- [ ] Compile node, python3, git, busybox as static ARM64 .so files
+- [ ] Ship in jniLibs/arm64-v8a/ (always executable, no SELinux issue)
+- [ ] Implement Strategy pattern + feature toggles alongside this
+- [ ] Opens iOS path (same approach, iOS toolchain)
 
 ## Pre-redesign completed
 - [x] Go backend daemon + health endpoint

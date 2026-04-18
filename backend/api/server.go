@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	agentctx "mo-code/backend/context"
 	"mo-code/backend/provider"
 	"mo-code/backend/runtime"
+	"mo-code/backend/tools"
 
 	"github.com/gorilla/websocket"
 )
@@ -43,6 +45,10 @@ type Server struct {
 	Registry *provider.Registry
 	// Proot is the optional proot runtime (nil if not configured).
 	Proot *runtime.ProotRuntime
+	// Dispatcher is the shared tool dispatcher used by TypeDirectToolCall
+	// (the `!<cmd>` shell-bypass path). Nil disables the feature — direct
+	// tool calls return INTERNAL_ERROR in that case.
+	Dispatcher *tools.Dispatcher
 }
 
 var upgrader = websocket.Upgrader{
@@ -113,6 +119,12 @@ func (s *Server) SetProot(p *runtime.ProotRuntime) {
 	s.Proot = p
 }
 
+// SetDispatcher attaches a tools.Dispatcher used for TypeDirectToolCall
+// (the `!<cmd>` shell-bypass feature). Without this, direct tool calls fail.
+func (s *Server) SetDispatcher(d *tools.Dispatcher) {
+	s.Dispatcher = d
+}
+
 // Port returns the port the server is listening on.
 func (s *Server) Port() int {
 	if s.listener == nil {
@@ -148,6 +160,7 @@ func (s *Server) newMux() *http.ServeMux {
 	mux.HandleFunc("/api/auth/copilot/device", s.handleCopilotDeviceAuth)
 	mux.HandleFunc("/api/auth/copilot/poll", s.handleCopilotPoll)
 	mux.HandleFunc("/api/runtime/status", s.handleRuntimeStatus)
+	mux.HandleFunc("/api/runtime/diagnose", s.handleRuntimeDiagnose)
 	mux.HandleFunc("/ws", s.handleWebSocket)
 
 	// File browser endpoints (used by Flutter Files tab).
@@ -198,6 +211,25 @@ func (s *Server) handleRuntimeStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) handleRuntimeDiagnose(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if s.Proot == nil {
+		// Non-Android daemon (e.g. Linux desktop) runs with no sandbox at all.
+		// Surface that honestly so the UI badge can warn the user.
+		_ = json.NewEncoder(w).Encode(runtime.DiagnosticResult{
+			Error:         "proot not configured — daemon running without sandbox",
+			IsolationTier: "no-sandbox",
+		})
+		return
+	}
+	result := s.Proot.Diagnose(r.Context())
+	_ = json.NewEncoder(w).Encode(result)
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -285,7 +317,13 @@ func (c *wsClient) serve() {
 		}
 
 		log.Printf("[ws:recv] type=%s id=%s task_id=%s", raw.Type, raw.ID, raw.TaskID)
-		c.dispatch(raw)
+		// Dispatch off the reader goroutine so long-running synchronous
+		// handlers (e.g. direct_tool_call → shell_exec running in the QEMU
+		// VM for 30-60s) don't block ReadJSON. If the reader stalls, we
+		// stop consuming pong frames → the server thinks the client went
+		// away, hangs up, and the result write fails with broken pipe.
+		// Concurrent writes are already guarded by c.writeMu.
+		go c.dispatch(raw)
 	}
 }
 
@@ -342,6 +380,12 @@ func (c *wsClient) dispatch(raw RawMessage) {
 		c.handleProviderSwitch(raw)
 	case TypeConfigSet:
 		c.handleConfigSet(raw)
+
+	// ----- Direct tool call (no LLM) -----
+	// Used by the Flutter `!<cmd>` shell-bypass feature. Skips the agent loop
+	// entirely and invokes a tool by name via the shared dispatcher.
+	case TypeDirectToolCall:
+		c.handleDirectToolCall(raw)
 
 	// ----- Sessions -----
 	case TypeSessionList:
@@ -649,6 +693,84 @@ func (c *wsClient) handleConfigSet(raw RawMessage) {
 		ID:      raw.ID,
 		Payload: c.server.Config.Snapshot(),
 	})
+}
+
+// ---------------------------------------------------------------------------
+// Direct tool call (no-LLM bypass)
+// ---------------------------------------------------------------------------
+
+// handleDirectToolCall services TypeDirectToolCall. Payload shape:
+//
+//	{"tool": "shell_exec", "args": {"command": "ls -la"}}
+//
+// The args field may also be a pre-encoded JSON string; either works. The tool
+// runs synchronously through the shared dispatcher, so runtime metadata
+// (proot / qemu-tcg / host) flows back untouched in the Result. This is what
+// the Flutter `!<cmd>` shell-bypass feature uses during sandbox beta testing.
+func (c *wsClient) handleDirectToolCall(raw RawMessage) {
+	if c.server.Dispatcher == nil {
+		c.sendError(raw.ID, ErrInternalError, "direct tool calls not available (no dispatcher configured)")
+		return
+	}
+
+	var payload DirectToolCallPayload
+	if err := json.Unmarshal(raw.Payload, &payload); err != nil {
+		c.sendError(raw.ID, ErrInvalidPayload, "invalid direct_tool_call payload")
+		return
+	}
+	if payload.Tool == "" {
+		c.sendError(raw.ID, ErrInvalidPayload, "tool is required")
+		return
+	}
+
+	// Normalize args to a JSON string for the Tool.Execute contract.
+	// Clients can send either an object ({"command":"ls"}) or a pre-encoded
+	// string — the dispatcher only cares about the final string.
+	argsStr := string(payload.Args)
+	if len(payload.Args) > 0 {
+		var asString string
+		if err := json.Unmarshal(payload.Args, &asString); err == nil {
+			argsStr = asString
+		}
+	}
+	if argsStr == "" {
+		argsStr = "{}"
+	}
+
+	log.Printf("[ws:direct_tool_call] tool=%s args=%s", payload.Tool, truncateForLog(argsStr, 200))
+
+	// Use a generous timeout — shell_exec itself enforces its own (default 120s,
+	// max 600s). This one is just a backstop in case a pathological tool hangs.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	result := c.server.Dispatcher.Dispatch(ctx, provider.ToolCall{
+		ID:   raw.ID,
+		Name: payload.Tool,
+		Args: argsStr,
+	})
+
+	c.send(OutMessage{
+		Type: TypeDirectToolResult,
+		ID:   raw.ID,
+		Payload: DirectToolResultPayload{
+			Tool:          payload.Tool,
+			Title:         result.Title,
+			Output:        result.Output,
+			Error:         result.Error,
+			Metadata:      result.Metadata,
+			FilesCreated:  result.FilesCreated,
+			FilesModified: result.FilesModified,
+		},
+	})
+}
+
+// truncateForLog keeps log lines bounded.
+func truncateForLog(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
 
 // ---------------------------------------------------------------------------
@@ -1098,7 +1220,12 @@ func (s *Server) handleCopilotDeviceAuth(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	dcResp, err := auth.StartDeviceFlow(r.Context())
+	// Use a background context with an explicit timeout — r.Context() is tied
+	// to the Flutter HTTP client connection and may be canceled before GitHub
+	// responds (especially on first launch when TLS handshake is slow).
+	authCtx, authCancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer authCancel()
+	dcResp, err := auth.StartDeviceFlow(authCtx)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -1132,7 +1259,9 @@ func (s *Server) handleCopilotPoll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := auth.PollForToken(r.Context(), req.DeviceCode)
+	pollCtx, pollCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer pollCancel()
+	result, err := auth.PollForToken(pollCtx, req.DeviceCode)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)

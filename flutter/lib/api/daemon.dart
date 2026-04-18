@@ -462,6 +462,28 @@ class OpenCodeAPI {
     }
   }
 
+  /// Run proot diagnostics via the Go daemon HTTP endpoint (POST /api/runtime/diagnose).
+  /// Returns a map with keys: ok, bin_exists, bin_executable, loader_exists,
+  /// rootfs_exists, echo_ok, exit_code, stderr, error.
+  /// Returns null on network error. Returns {"error":"proot not configured"} when
+  /// proot is disabled on the daemon side.
+  Future<Map<String, dynamic>?> runProotDiagnostic() async {
+    try {
+      final resp = await http.post(
+        Uri.parse('$_baseUrl/api/runtime/diagnose'),
+        headers: _authHeaders,
+      );
+      if (resp.statusCode == 200) {
+        return jsonDecode(resp.body) as Map<String, dynamic>;
+      }
+      _log.error('http', 'Runtime diagnose: HTTP ${resp.statusCode}');
+      return null;
+    } catch (e) {
+      _log.error('http', 'Runtime diagnose failed: $e');
+      return null;
+    }
+  }
+
   /// Fetch runtime status from the Go daemon HTTP endpoint.
   Future<Map<String, dynamic>?> fetchRuntimeStatus() async {
     try {
@@ -556,10 +578,13 @@ class OpenCodeAPI {
   Future<Map<String, dynamic>?> startCopilotAuth() async {
     _log.info('http', 'POST /api/auth/copilot/device');
     try {
-      final resp = await http.post(
-        Uri.parse('$_baseUrl/api/auth/copilot/device'),
-        headers: _authHeaders,
-      );
+      // 75s: daemon needs up to 60s for GitHub TLS handshake on first connect.
+      final resp = await http
+          .post(
+            Uri.parse('$_baseUrl/api/auth/copilot/device'),
+            headers: _authHeaders,
+          )
+          .timeout(const Duration(seconds: 75));
       if (resp.statusCode == 200) {
         _log.info('http', 'Copilot device auth started');
         return jsonDecode(resp.body) as Map<String, dynamic>;
@@ -636,6 +661,30 @@ class OpenCodeAPI {
       'id': 'cancel-${DateTime.now().millisecondsSinceEpoch}',
       'task_id': taskId,
     });
+  }
+
+  /// Invoke a tool directly on the daemon without going through the LLM.
+  /// Backs the chat `!<cmd>` shell-bypass feature: we send
+  /// `direct_tool_call` and the daemon replies with `direct_tool_result`.
+  /// The returned ID lets callers correlate the response.
+  String? sendDirectToolCall(
+    String tool, {
+    Map<String, dynamic>? args,
+  }) {
+    _msgCounter++;
+    final id = 'dt-$_msgCounter-${DateTime.now().millisecondsSinceEpoch}';
+    final sent = sendWsJson({
+      'type': 'direct_tool_call',
+      'id': id,
+      'payload': {
+        'tool': tool,
+        if (args != null) 'args': args,
+      },
+    });
+    if (sent) {
+      _log.info('ws', 'direct_tool_call → $tool (id=$id)');
+    }
+    return sent ? id : null;
   }
 
   // --- Session management via WebSocket ---

@@ -459,3 +459,106 @@ With 4 agents (Claude/Codex, Gemini, Copilot, Minimax), here's the optimal paral
 
 ### Week 9-11:
 - **All:** MO-53 (Testing + ship)
+
+---
+
+## Phase 6: proot Android 15 Fix (ISSUE-010)
+
+**Goal:** Fix shell command execution (npm, pip, git clone, etc.) on Android 15.
+**Root cause:** Android 15 SELinux blocks `mmap(PROT_EXEC)` on `app_data_file` binaries — the proot loader crashes with SIGSEGV → exit 255.
+**Fix:** Patch the proot loader to copy ELF segments into anonymous `memfd` files (no SELinux label) before mapping them executable.
+**Spec:** `docs/features/FEAT-004-proot-android15-memfd-fix.md`
+
+---
+
+### Story: MO-60 — proot loader memfd_create patch
+**Points:** 5 | **Assignee:** C1 | **Priority:** P0
+
+**Description:** Patch `loader.c` from proot-me v5.3.0 to use `memfd_create` for ELF segment mapping. Cross-compile with Android NDK. Deploy as `libproot-loader.so`.
+
+**Subtasks:**
+- [ ] **MO-60.1** — Clone proot-me v5.3.0, set up NDK cross-compile toolchain
+- [ ] **MO-60.2** — Write `scripts/build-loader.sh` — reproducible NDK build script
+- [ ] **MO-60.3** — Patch `loader.c`: add `memfd_copy_segment()` helper using `SYS_memfd_create` syscall
+- [ ] **MO-60.4** — Replace direct file mmap with memfd copy in `LOAD_ACTION_MMAP_FILE` handler
+- [ ] **MO-60.5** — Compile: `aarch64-linux-android24-clang -static -fno-PIE -nostdlib`
+- [ ] **MO-60.6** — Deploy to `flutter/android/app/src/main/jniLibs/arm64-v8a/libproot-loader.so`
+- [ ] **MO-60.7** — Write `scripts/verify-loader.sh` — ptrace diagnostic probe to confirm fix
+- [ ] **MO-60.8** — Rebuild APK, USB-test `echo ok` → `apk update` → `npm --version` on OnePlus CPH2467
+
+**Acceptance criteria:**
+- `proot /bin/sh -c "echo ok"` returns exit 0 on Android 15 API 35
+- `npm --version`, `python3 --version`, `git --version` all succeed inside proot
+- No regression on Android 12/13/14 (test on emulators)
+- `libproot-loader.so` is ≤ 10KB static binary
+
+---
+
+### Story: MO-61 — Go backend proot diagnostics and error handling
+**Points:** 3 | **Assignee:** C2 | **Priority:** P0
+
+**Description:** Add startup proot health check, distinguish loader crash (exit 255) from command failure, emit structured `runtime.setup` error events so Flutter can show actionable status.
+
+**Subtasks:**
+- [ ] **MO-61.1** — `runtime/proot.go`: add `Diagnose(ctx)` — runs `echo ok`, returns typed `DiagnosticResult` (ok / loader_crash / exec_blocked / timeout)
+- [ ] **MO-61.2** — `cmd/mocode/main.go`: call `proot.Diagnose()` at startup; log result; if loader_crash emit `runtime.setup` WS event with `phase: "failed"` and actionable message
+- [ ] **MO-61.3** — `tools/shell.go`: distinguish exit 255 + empty stderr (loader crash) from exit 255 with stderr (command returned 255) — set `error` field accordingly
+- [ ] **MO-61.4** — `runtime/proot_test.go`: add `TestDiagnose_*` tests with mock proot binary stubs
+- [ ] **MO-61.5** — `runtime/proot_test.go`: fix pre-existing `TestProotArgs` failures (resolv.conf arg order) — **already done, verify still passing**
+
+**Acceptance criteria:**
+- Daemon logs clear reason for proot failure at startup
+- Flutter receives `runtime.setup {phase: "failed", message: "..."}` when proot is broken
+- Shell tool error message distinguishes loader crash from real command exit 255
+- All runtime tests pass
+
+---
+
+### Story: MO-62 — Flutter/Android proot status UI and degraded mode
+**Points:** 3 | **Assignee:** C3 | **Priority:** P1
+
+**Description:** Show proot health in the UI, degrade gracefully when proot is broken (go-git tools still work), add diagnostic button in Config screen.
+
+**Subtasks:**
+- [ ] **MO-62.1** — `DaemonService.kt`: after `RuntimeBootstrap.bootstrap()`, call Go health endpoint; if proot failed log `W/MoCodeDaemon: proot unavailable` + set `DaemonService.prootAvailable = false`
+- [ ] **MO-62.2** — `agent_screen.dart`: listen for `runtime.setup {phase: "failed"}` WS event; show amber banner "Shell runtime unavailable — git/file ops work, npm/pip require a fix"
+- [ ] **MO-62.3** — `config_screen.dart`: add "Runtime Diagnostics" section — proot status badge (green/red), "Run Diagnostic" button that calls `/api/runtime/status` and shows raw result
+- [ ] **MO-62.4** — `daemon.dart`: add `runProotDiagnostic()` method — POST `/api/runtime/diagnose`, return `DiagnosticResult`
+- [ ] **MO-62.5** — `server.go`: add `POST /api/runtime/diagnose` endpoint that calls `proot.Diagnose()` and returns JSON
+- [ ] **MO-62.6** — After MO-60 loader fix lands: remove degraded-mode banner, verify green status in config screen on device
+
+**Acceptance criteria:**
+- Config screen shows proot status (available / unavailable) in real time
+- When proot is broken, agent screen shows amber banner listing what still works
+- "Run Diagnostic" button returns result within 5 seconds
+- After MO-60 fix: banner never appears on a healthy device
+
+---
+
+## Phase 6 parallel schedule
+
+All three stories have **zero file conflicts** — they touch disjoint files:
+
+| | C1 | C2 | C3 |
+|---|---|---|---|
+| `loader.c` (new) | ✅ | | |
+| `scripts/build-loader.sh` (new) | ✅ | | |
+| `jniLibs/libproot-loader.so` | ✅ | | |
+| `runtime/proot.go` | | ✅ | |
+| `runtime/proot_test.go` | | ✅ | |
+| `cmd/mocode/main.go` | | ✅ | |
+| `tools/shell.go` | | ✅ | |
+| `DaemonService.kt` | | | ✅ |
+| `agent_screen.dart` | | | ✅ |
+| `config_screen.dart` | | | ✅ |
+| `daemon.dart` | | | ✅ |
+| `api/server.go` | | | ✅ |
+
+**C1 and C2 can start immediately in parallel.**
+**C3 depends on C2's `runtime.setup` failure event shape** (MO-61.2) — C3 should start after MO-61.2 is merged, or stub the event shape from the spec.
+
+**Integration order:**
+1. C2 merges first (backend diagnostics, no binary changes)
+2. C1 merges (new loader binary — APK rebuild required)
+3. C3 merges (UI wired to C2 events)
+4. USB device test with all three merged

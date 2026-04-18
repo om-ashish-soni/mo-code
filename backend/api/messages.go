@@ -49,6 +49,13 @@ const (
 	TypeGitPush        = "git.push"
 	TypeGitDiff        = "git.diff"
 	TypeGitClone       = "git.clone"
+
+	// TypeDirectToolCall bypasses the LLM and invokes a tool directly via the
+	// dispatcher. Used by the Flutter `!<cmd>` shell-bypass feature during
+	// sandbox beta testing — lets us drive shell_exec without paying for an
+	// LLM round-trip. Payload: DirectToolCallPayload. Response:
+	// TypeDirectToolResult (or TypeError on failure).
+	TypeDirectToolCall = "direct_tool_call"
 )
 
 // Server → Client
@@ -70,6 +77,10 @@ const (
 	TypeError              = "error"
 	TypeRuntimeSetup       = "runtime.setup"
 	TypeRuntimeReady       = "runtime.ready"
+
+	// TypeDirectToolResult is the response to TypeDirectToolCall. Payload is
+	// DirectToolResultPayload — mirrors tools.Result plus the tool name.
+	TypeDirectToolResult = "direct_tool_result"
 )
 
 // ---------------------------------------------------------------------------
@@ -164,6 +175,15 @@ type GitClonePayload struct {
 	URL    string `json:"url"`
 	Dest   string `json:"dest"`
 	Branch string `json:"branch,omitempty"`
+}
+
+// DirectToolCallPayload is the client → server envelope for a no-LLM tool
+// invocation. Args accepts either a JSON object (decoded and re-encoded to
+// match the tool's Parameters schema) or a pre-encoded JSON string — whichever
+// is more convenient for the client.
+type DirectToolCallPayload struct {
+	Tool string          `json:"tool"`
+	Args json.RawMessage `json:"args,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -266,6 +286,19 @@ type ErrorPayload struct {
 	Message     string `json:"message"`
 	Recoverable bool   `json:"recoverable,omitempty"`
 	Suggestion  string `json:"suggestion,omitempty"`
+}
+
+// DirectToolResultPayload is the server → client envelope for a
+// TypeDirectToolCall response. Mirrors tools.Result plus the tool name so
+// the UI can pick a renderer.
+type DirectToolResultPayload struct {
+	Tool          string         `json:"tool"`
+	Title         string         `json:"title,omitempty"`
+	Output        string         `json:"output"`
+	Error         string         `json:"error,omitempty"`
+	Metadata      map[string]any `json:"metadata,omitempty"`
+	FilesCreated  []string       `json:"files_created,omitempty"`
+	FilesModified []string       `json:"files_modified,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

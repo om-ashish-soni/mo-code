@@ -10,6 +10,7 @@ import (
 
 	agentctx "mo-code/backend/context"
 	"mo-code/backend/provider"
+	"mo-code/backend/runtime"
 	"mo-code/backend/tools"
 )
 
@@ -56,16 +57,24 @@ type SubagentResult struct {
 type SubagentRunner struct {
 	registry   provider.ProviderRegistry
 	workingDir string
+	proot      *runtime.ProotRuntime
+	qemu       *runtime.QemuRuntime
 
 	mu      sync.Mutex
 	running int
 }
 
 // NewSubagentRunner creates a runner for subagent sessions.
-func NewSubagentRunner(registry provider.ProviderRegistry, workingDir string) *SubagentRunner {
+// proot is optional — pass it to route shell commands through proot on Android.
+func NewSubagentRunner(registry provider.ProviderRegistry, workingDir string, proot ...*runtime.ProotRuntime) *SubagentRunner {
+	var pr *runtime.ProotRuntime
+	if len(proot) > 0 {
+		pr = proot[0]
+	}
 	return &SubagentRunner{
 		registry:   registry,
 		workingDir: workingDir,
+		proot:      pr,
 	}
 }
 
@@ -100,7 +109,7 @@ func (s *SubagentRunner) Run(ctx context.Context, req SubagentRequest) SubagentR
 	}
 
 	// Build tools based on subagent type.
-	dispatcher := subagentDispatcher(req.Type, workDir)
+	dispatcher := subagentDispatcher(req.Type, workDir, s.proot, s.qemu)
 	toolNames := dispatcher.Names()
 	toolDefs := dispatcher.ToolDefs()
 
@@ -226,7 +235,9 @@ func (s *SubagentRunner) RunningCount() int {
 }
 
 // subagentDispatcher creates a tool dispatcher for the given subagent type.
-func subagentDispatcher(agentType SubagentType, workDir string) *tools.Dispatcher {
+// proot routes shell commands through Alpine Linux on Android (nil = host exec).
+// qemu takes precedence over proot for shell_exec when both are set.
+func subagentDispatcher(agentType SubagentType, workDir string, proot *runtime.ProotRuntime, qemu *runtime.QemuRuntime) *tools.Dispatcher {
 	d := tools.NewDispatcher()
 
 	switch agentType {
@@ -242,11 +253,18 @@ func subagentDispatcher(agentType SubagentType, workDir string) *tools.Dispatche
 		d.Register(tools.NewFileWrite(workDir))
 		d.Register(tools.NewFileList(workDir))
 		d.Register(tools.NewFileEdit(workDir))
-		d.Register(tools.NewShellExec(workDir))
+		switch {
+		case qemu != nil:
+			d.Register(tools.NewShellExecWithQemu(workDir, qemu))
+		case proot != nil:
+			d.Register(tools.NewShellExecWithProot(workDir, proot))
+		default:
+			d.Register(tools.NewShellExec(workDir))
+		}
 		d.Register(tools.NewGrep(workDir))
 		d.Register(tools.NewGlob(workDir))
 		d.Register(tools.NewGitStatus(workDir))
-		d.Register(tools.NewGitDiff(workDir))
+		d.Register(tools.NewGitDiff(workDir, proot))
 		d.Register(tools.NewGitLog(workDir))
 	}
 
