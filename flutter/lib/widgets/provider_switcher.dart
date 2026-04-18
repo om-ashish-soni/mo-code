@@ -5,30 +5,66 @@ import '../theme/colors.dart';
 
 /// GitHub Copilot models — the single Copilot provider serves all of these.
 const copilotModels = [
-  _ModelDef('gpt-4o', 'GPT-4o', 'Fast, balanced'),
-  _ModelDef('gpt-4.1', 'GPT-4.1', 'Latest GPT'),
-  _ModelDef('gpt-5-mini', 'GPT-5 Mini', 'Compact, latest'),
-  _ModelDef('gpt-4o-mini', 'GPT-4o Mini', 'Fast, cheap'),
-  _ModelDef('claude-haiku-4.5', 'Claude Haiku 4.5', 'Anthropic, fast'),
-  _ModelDef('gemini-2.5-pro', 'Gemini 2.5 Pro', 'Google, advanced'),
-  _ModelDef('grok-code-fast-1', 'Grok Code Fast', 'xAI, code'),
+  ModelOption('gpt-5-mini', 'GPT-5 Mini', 'Compact, latest'),
+  ModelOption('gpt-4o', 'GPT-4o', 'Fast, balanced'),
+  ModelOption('gpt-4.1', 'GPT-4.1', 'Latest GPT'),
+  ModelOption('gpt-4o-mini', 'GPT-4o Mini', 'Fast, cheap'),
+  ModelOption('claude-haiku-4.5', 'Claude Haiku 4.5', 'Anthropic, fast'),
+  ModelOption('gemini-2.5-pro', 'Gemini 2.5 Pro', 'Google, advanced'),
+  ModelOption('grok-code-fast-1', 'Grok Code Fast', 'xAI, code'),
 ];
 
 const claudeModels = [
-  _ModelDef('claude-sonnet-4-20250514', 'Claude Sonnet 4', 'Latest'),
-  _ModelDef('claude-3.5-haiku-20241022', 'Claude 3.5 Haiku', 'Fast'),
+  ModelOption('claude-sonnet-4-20250514', 'Claude Sonnet 4', 'Latest'),
+  ModelOption('claude-3.5-haiku-20241022', 'Claude 3.5 Haiku', 'Fast'),
 ];
 
 const geminiModels = [
-  _ModelDef('gemini-2.5-pro', 'Gemini 2.5 Pro', 'Advanced'),
-  _ModelDef('gemini-2.5-flash', 'Gemini 2.5 Flash', 'Fast'),
+  ModelOption('gemini-2.5-flash', 'Gemini 2.5 Flash', 'Fast, cheap'),
+  ModelOption('gemini-2.5-pro', 'Gemini 2.5 Pro', 'Advanced'),
 ];
 
-class _ModelDef {
+const openrouterModels = [
+  ModelOption('anthropic/claude-sonnet-4', 'Claude Sonnet 4', 'Daily driver'),
+  ModelOption('anthropic/claude-haiku-4.5', 'Claude Haiku 4.5', 'Cheap, fast'),
+  ModelOption('openai/gpt-4o', 'GPT-4o', 'OpenAI baseline'),
+  ModelOption('openai/gpt-4o-mini', 'GPT-4o Mini', 'Cheapest OAI'),
+  ModelOption('zhipuai/glm-4.6', 'GLM-4.6', 'Cheap, code-strong'),
+  ModelOption('minimax/minimax-m2', 'MiniMax M2', 'Long context, cheap'),
+  ModelOption('deepseek/deepseek-v3.2', 'DeepSeek V3.2', 'Strong code, cheap'),
+  ModelOption('qwen/qwen3-coder-480b', 'Qwen3 Coder 480B', 'Code specialist'),
+];
+
+const ollamaModels = [
+  ModelOption('qwen2.5-coder:7b', 'Qwen2.5 Coder 7B', 'Local, code'),
+  ModelOption('llama3.1:8b', 'Llama 3.1 8B', 'Local, general'),
+  ModelOption('deepseek-coder-v2:16b', 'DeepSeek Coder V2', 'Local, code'),
+];
+
+const azureModels = [
+  ModelOption('gpt-4o', 'GPT-4o', 'Azure deployment name'),
+  ModelOption('gpt-4o-mini', 'GPT-4o Mini', 'Azure deployment name'),
+];
+
+class ModelOption {
   final String id;
   final String label;
   final String description;
-  const _ModelDef(this.id, this.label, this.description);
+  const ModelOption(this.id, this.label, this.description);
+}
+
+/// Single source of truth for the model list of a given provider.
+/// Returns an empty list for unknown providers.
+List<ModelOption> modelsForProvider(String provider) {
+  return switch (provider) {
+    'copilot' => copilotModels,
+    'claude' => claudeModels,
+    'gemini' => geminiModels,
+    'openrouter' => openrouterModels,
+    'ollama' => ollamaModels,
+    'azure' => azureModels,
+    _ => const [],
+  };
 }
 
 class ProviderSwitcher extends StatelessWidget {
@@ -274,20 +310,16 @@ class _ModelPickerSheet extends StatelessWidget {
       'copilot' => 'Copilot',
       'claude' => 'Claude',
       'gemini' => 'Gemini',
+      'openrouter' => 'OpenRouter',
+      'ollama' => 'Ollama',
+      'azure' => 'Azure',
       _ => p,
     };
   }
 
-  List<_ModelDef> _modelsForProvider() {
-    return switch (activeProvider) {
-      'copilot' => copilotModels,
-      'claude' => claudeModels,
-      'gemini' => geminiModels,
-      _ => [],
-    };
-  }
+  List<ModelOption> _modelsForProvider() => modelsForProvider(activeProvider);
 
-  Widget _buildModelTile(_ModelDef model) {
+  Widget _buildModelTile(ModelOption model) {
     final isActive = model.id == activeModel;
     return InkWell(
       onTap: () {

@@ -23,12 +23,20 @@ const (
 	shellMaxOutput = 100 * 1024 // 100KB
 )
 
+// shellBackend abstracts a sandboxed command runner. Both *runtime.ProotRuntime
+// and *runtime.QemuRuntime satisfy it — the shell tool routes through whichever
+// was configured at daemon start.
+type shellBackend interface {
+	Exec(ctx context.Context, command, workDir string) (stdout, stderr string, exitCode int, err error)
+}
+
 // ShellExec executes shell commands within the working directory.
-// When a ProotRuntime is configured, commands are routed through proot + Alpine.
+// When a backend is configured, commands are routed through it.
 // When nil, commands execute directly on the host OS.
 type ShellExec struct {
-	workDir string
-	proot   *runtime.ProotRuntime
+	workDir     string
+	backend     shellBackend
+	backendName string // "proot", "qemu-tcg", or "" for direct host exec
 }
 
 // NewShellExec creates a ShellExec with direct host execution.
@@ -38,7 +46,22 @@ func NewShellExec(workDir string) *ShellExec {
 
 // NewShellExecWithProot creates a ShellExec that routes commands through proot.
 func NewShellExecWithProot(workDir string, proot *runtime.ProotRuntime) *ShellExec {
-	return &ShellExec{workDir: workDir, proot: proot}
+	return &ShellExec{
+		workDir:     workDir,
+		backend:     proot,
+		backendName: "proot",
+	}
+}
+
+// NewShellExecWithQemu creates a ShellExec that routes commands through a
+// qemu-tcg VM. Much stronger isolation than proot; ~8-14 s cold boot per call
+// in the spawn-per-command mode used today.
+func NewShellExecWithQemu(workDir string, qemu *runtime.QemuRuntime) *ShellExec {
+	return &ShellExec{
+		workDir:     workDir,
+		backend:     qemu,
+		backendName: "qemu-tcg",
+	}
 }
 
 func (s *ShellExec) Name() string { return "shell_exec" }
@@ -124,17 +147,40 @@ func (s *ShellExec) Execute(ctx context.Context, argsJSON string) Result {
 	var runErr error
 
 	execRuntime := "host"
-	if s.proot != nil {
-		execRuntime = "proot"
-		stdoutStr, stderrStr, exitCode, runErr = s.proot.Exec(cmdCtx, args.Command, workDir)
+	if s.backend != nil {
+		execRuntime = s.backendName
+		stdoutStr, stderrStr, exitCode, runErr = s.backend.Exec(cmdCtx, args.Command, workDir)
+
 		// proot exits 255 when the tracee dies from a signal (e.g. SIGSEGV in the
 		// loader) before producing any output. On Android 15 this means the SELinux
-		// exec restriction blocked the loader — see ISSUE-010.
-		if exitCode == 255 && stdoutStr == "" && stderrStr == "" {
+		// exec restriction blocked the loader — see ISSUE-010. This check is
+		// proot-specific; qemu's 255 means something else.
+		if s.backendName == "proot" && exitCode == 255 && stdoutStr == "" && stderrStr == "" {
 			stderrStr = "proot exited with code 255 — the shell environment could not start. " +
 				"On Android 15 this is caused by SELinux blocking exec of rootfs binaries (ISSUE-010). " +
 				"Git operations (status, log, add, commit, push) still work via the built-in go-git library. " +
 				"Commands requiring npm, pip, or other tools are unavailable until the proot issue is resolved."
+		}
+
+		// When a command is not found, give an actionable apk-add hint.
+		// Exit code 127 = "command not found" in POSIX shells.
+		if exitCode == 127 {
+			cmd0 := strings.Fields(args.Command)
+			hint := ""
+			if len(cmd0) > 0 {
+				pkg := apkPackageForCommand(cmd0[0])
+				if pkg != "" {
+					switch s.backendName {
+					case "proot":
+						hint = fmt.Sprintf(" Run `apk add %s` inside proot to install it, or wait for the daemon's startup bootstrap to complete.", pkg)
+					case "qemu-tcg":
+						hint = fmt.Sprintf(" The qemu-tcg VM runs with -net none in v1 beta, so `apk add %s` is not available. Only the packages baked into initramfs-rootfs-py are present.", pkg)
+					}
+				}
+			}
+			if hint != "" && stderrStr != "" {
+				stderrStr += hint
+			}
 		}
 	} else {
 		stdoutStr, stderrStr, exitCode, runErr = s.execDirect(cmdCtx, args.Command, workDir)
@@ -231,12 +277,44 @@ func (s *ShellExec) execDirect(ctx context.Context, command, workDir string) (st
 	return outBuf.String(), errBuf.String(), exitCode, err
 }
 
-// runtimeLabel returns "proot" or "host" for metadata.
+// runtimeLabel returns the backend name ("proot", "qemu-tcg") or "host" for metadata.
 func (s *ShellExec) runtimeLabel() string {
-	if s.proot != nil {
-		return "proot"
+	if s.backendName != "" {
+		return s.backendName
 	}
 	return "host"
+}
+
+// apkPackageForCommand returns the apk package name that provides a given command,
+// or an empty string if unknown. Used to give actionable hints in error messages.
+func apkPackageForCommand(cmd string) string {
+	m := map[string]string{
+		"npm":    "nodejs npm",
+		"node":   "nodejs",
+		"npx":    "nodejs npm",
+		"python": "python3",
+		"python3": "python3",
+		"pip":    "py3-pip",
+		"pip3":   "py3-pip",
+		"git":    "git",
+		"curl":   "curl",
+		"wget":   "wget",
+		"ssh":    "openssh",
+		"go":     "go",
+		"make":   "make",
+		"gcc":    "gcc",
+		"g++":    "g++",
+		"java":   "openjdk21",
+		"mvn":    "maven",
+		"gradle": "gradle",
+		"rustc":  "rust",
+		"cargo":  "cargo",
+		"ruby":   "ruby",
+		"gem":    "ruby",
+		"php":    "php",
+		"perl":   "perl",
+	}
+	return m[cmd]
 }
 
 // isDangerous returns true for commands that should never be run by an agent.

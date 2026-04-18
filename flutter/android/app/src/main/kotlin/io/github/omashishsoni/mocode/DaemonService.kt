@@ -168,6 +168,22 @@ class DaemonService : Service() {
             Log.i(TAG, "proot enabled: bin=${runtimePaths.prootBin} rootfs=${runtimePaths.rootFS}")
         }
 
+        // qemu-tcg bundle detection: if filesDir/qemu-smoke has been staged with a
+        // usable layout, export MOCODE_QEMU_BUNDLE so the Go daemon takes the
+        // stronger-isolation path for shell_exec. Backend prefers qemu over proot
+        // when both are set; git tools still route through proot.
+        val qemuBundle = File(filesDir, "qemu-smoke")
+        val qemuBinary = File(qemuBundle, "bin/qemu-system-aarch64")
+        val qemuKernel = File(qemuBundle, "boot/vmlinuz-virt")
+        val qemuScript = File(qemuBundle, "qemu-exec-py.sh")
+        if (qemuBinary.exists() && qemuKernel.exists() && qemuScript.exists()) {
+            env["MOCODE_QEMU_BUNDLE"] = qemuBundle.absolutePath
+            env["MOCODE_QEMU_PROJECTS"] = workDir
+            Log.i(TAG, "qemu-tcg enabled: bundle=${qemuBundle.absolutePath}")
+        } else {
+            Log.d(TAG, "qemu-tcg bundle not present at ${qemuBundle.absolutePath} (staying on proot)")
+        }
+
         val pb = ProcessBuilder(binary.absolutePath)
         pb.directory(filesDir)
         pb.redirectErrorStream(true)

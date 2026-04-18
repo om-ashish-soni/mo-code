@@ -13,7 +13,7 @@ import (
 
 const (
 	geminiAPIURL           = "https://generativelanguage.googleapis.com/v1beta/models"
-	geminiDefaultModel     = "gemini-2.0-flash"
+	geminiDefaultModel     = "gemini-2.5-flash"
 	geminiMaxTokensDefault = 8192
 )
 
@@ -178,7 +178,7 @@ func (g *Gemini) buildRequest(messages []Message, tools []ToolDef, cfg Config) m
 			funcDecls[i] = map[string]any{
 				"name":        t.Name,
 				"description": t.Description,
-				"parameters":  params,
+				"parameters":  sanitizeGeminiSchema(params),
 			}
 		}
 		body["tools"] = []map[string]any{
@@ -187,6 +187,39 @@ func (g *Gemini) buildRequest(messages []Message, tools []ToolDef, cfg Config) m
 	}
 
 	return body
+}
+
+// Gemini's Schema subset rejects several JSON Schema keywords that other
+// providers accept. Strip them recursively before sending the tool
+// parameters, otherwise we get HTTP 400 INVALID_ARGUMENT for maps like
+// webfetch's `headers: {additionalProperties: {type: string}}`.
+var geminiUnsupportedKeys = map[string]struct{}{
+	"additionalProperties": {},
+	"$schema":              {},
+	"$ref":                 {},
+	"definitions":          {},
+	"patternProperties":    {},
+}
+
+func sanitizeGeminiSchema(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, val := range x {
+			if _, skip := geminiUnsupportedKeys[k]; skip {
+				continue
+			}
+			out[k] = sanitizeGeminiSchema(val)
+		}
+		return out
+	case []any:
+		for i, item := range x {
+			x[i] = sanitizeGeminiSchema(item)
+		}
+		return x
+	default:
+		return v
+	}
 }
 
 func (g *Gemini) readSSE(ctx context.Context, body io.ReadCloser, ch chan<- StreamChunk) {

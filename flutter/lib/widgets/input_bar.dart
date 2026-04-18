@@ -3,12 +3,30 @@ import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../theme/colors.dart';
 
+/// One entry in the inline autocomplete popup shown above the input bar.
+/// Parent provides a `suggest` callback that maps the current text to a list
+/// of these; InputBar handles navigation, filling, and optional auto-submit.
+class CommandSuggestion {
+  final String display;
+  final String? hint;
+  final String value;
+  final bool autoSubmit;
+
+  const CommandSuggestion({
+    required this.display,
+    required this.value,
+    this.hint,
+    this.autoSubmit = false,
+  });
+}
+
 class InputBar extends StatefulWidget {
   final Function(String) onSubmit;
   final bool disabled;
   final bool showMic;
   final bool taskRunning;
   final VoidCallback? onStop;
+  final List<CommandSuggestion> Function(String text)? suggest;
 
   const InputBar({
     super.key,
@@ -17,6 +35,7 @@ class InputBar extends StatefulWidget {
     this.showMic = false,
     this.taskRunning = false,
     this.onStop,
+    this.suggest,
   });
 
   @override
@@ -33,6 +52,10 @@ class _InputBarState extends State<InputBar> {
   final List<String> _history = [];
   int _historyIndex = -1;
   String _savedInput = '';
+
+  // Inline autocomplete
+  List<CommandSuggestion> _suggestions = const [];
+  int _selectedSuggestion = 0;
 
   @override
   void initState() {
@@ -61,12 +84,61 @@ class _InputBarState extends State<InputBar> {
     HapticFeedback.lightImpact();
     widget.onSubmit(text);
     _controller.clear();
-    setState(() => _hasText = false);
+    setState(() {
+      _hasText = false;
+      _suggestions = const [];
+      _selectedSuggestion = 0;
+    });
+  }
+
+  void _refreshSuggestions(String text) {
+    final next = widget.suggest?.call(text) ?? const <CommandSuggestion>[];
+    _suggestions = next;
+    if (_selectedSuggestion >= next.length) _selectedSuggestion = 0;
+  }
+
+  void _acceptSuggestion(CommandSuggestion s) {
+    _controller.text = s.value;
+    _controller.selection =
+        TextSelection.collapsed(offset: _controller.text.length);
+    _refreshSuggestions(_controller.text);
+    setState(() => _hasText = _controller.text.isNotEmpty);
+    if (s.autoSubmit) {
+      _submit();
+    } else {
+      _textFieldFocus.requestFocus();
+    }
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
+    }
+
+    // Suggestions take priority over history when visible.
+    if (_suggestions.isNotEmpty) {
+      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        setState(() => _selectedSuggestion =
+            (_selectedSuggestion + 1) % _suggestions.length);
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        setState(() => _selectedSuggestion =
+            (_selectedSuggestion - 1 + _suggestions.length) %
+                _suggestions.length);
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.tab) {
+        _acceptSuggestion(_suggestions[_selectedSuggestion]);
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.escape) {
+        setState(() {
+          _suggestions = const [];
+          _selectedSuggestion = 0;
+        });
+        return KeyEventResult.handled;
+      }
     }
 
     if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
@@ -116,9 +188,14 @@ class _InputBarState extends State<InputBar> {
       ),
       child: SafeArea(
         top: false,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (_suggestions.isNotEmpty) _buildSuggestionList(),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
             // Text field with rounded pill shape
             Expanded(
               child: Container(
@@ -135,6 +212,9 @@ class _InputBarState extends State<InputBar> {
                 child: Focus(
                   focusNode: _focusNode,
                   onKeyEvent: _handleKeyEvent,
+                  // Keep Tab from bubbling to default focus traversal when
+                  // suggestions are visible — we handle it as "accept".
+                  skipTraversal: true,
                   child: TextField(
                     controller: _controller,
                     focusNode: _textFieldFocus,
@@ -165,9 +245,8 @@ class _InputBarState extends State<InputBar> {
                     ),
                     onChanged: (value) {
                       _historyIndex = -1;
-                      if (value.isEmpty != !_hasText) {
-                        setState(() => _hasText = value.isNotEmpty);
-                      }
+                      _refreshSuggestions(value);
+                      setState(() => _hasText = value.isNotEmpty);
                     },
                     onSubmitted: (_) {
                       _submit();
@@ -180,8 +259,78 @@ class _InputBarState extends State<InputBar> {
             const SizedBox(width: AppSpacing.sm),
             // Send / Stop button — proper 44px touch target
             _buildActionButton(),
+              ],
+            ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildSuggestionList() {
+    return Container(
+      constraints: const BoxConstraints(maxHeight: 240),
+      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(color: AppColors.border, width: 1),
+        boxShadow: AppColors.cardShadow,
+      ),
+      child: ListView.builder(
+        shrinkWrap: true,
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        itemCount: _suggestions.length,
+        itemBuilder: (ctx, i) {
+          final s = _suggestions[i];
+          final selected = i == _selectedSuggestion;
+          return InkWell(
+            onTap: () => _acceptSuggestion(s),
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: 10,
+              ),
+              color: selected ? AppColors.purpleDim.withAlpha(80) : null,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          s.display,
+                          style: AppTheme.codeFont(
+                            fontSize: 13,
+                            color: selected
+                                ? AppColors.purpleLight
+                                : AppColors.textPrimary,
+                          ),
+                        ),
+                        if (s.hint != null) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            s.hint!,
+                            style: AppTheme.uiFont(
+                              fontSize: 11,
+                              color: AppColors.textMuted,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  if (selected)
+                    const Icon(
+                      Icons.keyboard_return,
+                      size: 14,
+                      color: AppColors.textMuted,
+                    ),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }

@@ -21,7 +21,7 @@ class AgentScreen extends StatefulWidget {
 class AgentScreenState extends State<AgentScreen> {
   final List<TerminalLine> _lines = [];
   String _activeProvider = 'copilot';
-  String _activeModel = 'gpt-4o';
+  String _activeModel = 'gpt-5-mini';
   bool _connected = false;
   bool _taskRunning = false;
   String? _activeTaskId;
@@ -49,6 +49,11 @@ class AgentScreenState extends State<AgentScreen> {
   String? _bootstrapMessage;
   int? _bootstrapPercent;
   Timer? _bootstrapPollTimer;
+
+  // Degraded mode — proot is configured but non-functional (e.g. Android 15 SELinux)
+  bool _prootDegraded = false;
+  String? _prootDegradedError;
+  bool _prootDegradedDismissed = false;
 
   // Track subscriptions for cleanup
   StreamSubscription? _messageSub;
@@ -118,6 +123,9 @@ class AgentScreenState extends State<AgentScreen> {
       // Cancel any pending reconnect timer.
       _reconnectTimer?.cancel();
 
+      // Check proot health in background — show degraded banner if broken.
+      _checkProotHealth(api);
+
       // Re-subscribe to streams (cancel old ones first).
       _messageSub?.cancel();
       _connectionSub?.cancel();
@@ -143,6 +151,37 @@ class AgentScreenState extends State<AgentScreen> {
       }
       _scheduleReconnect();
     }
+  }
+
+  /// Runs proot diagnostics after connect. Shows a degraded-mode banner when
+  /// proot is configured but the echo-ok test fails (ISSUE-010 / Android 15).
+  Future<void> _checkProotHealth(OpenCodeAPI api) async {
+    // Only run on Android — on desktop proot is not used.
+    final runtimeStatus = await api.fetchRuntimeStatus();
+    if (!mounted) return;
+    final prootAvailable = runtimeStatus?['available'] == true;
+    if (!prootAvailable) return; // proot not configured — no banner needed
+
+    final diag = await api.runProotDiagnostic();
+    if (!mounted) return;
+    if (diag == null) return; // network error — silent
+    final ok = diag['ok'] == true;
+    if (ok) {
+      // Runtime healthy — clear any stale degraded state.
+      if (_prootDegraded) {
+        setState(() {
+          _prootDegraded = false;
+          _prootDegradedError = null;
+        });
+      }
+      return;
+    }
+    final error = diag['error'] as String? ?? 'proot runtime check failed';
+    setState(() {
+      _prootDegraded = true;
+      _prootDegradedError = error;
+      _prootDegradedDismissed = false;
+    });
   }
 
   void _scheduleReconnect() {
@@ -274,6 +313,20 @@ class AgentScreenState extends State<AgentScreen> {
         });
         break;
       case 'error':
+        // If this error is for a pending direct_tool_call (shell bypass),
+        // render it in that flow and don't touch task-running state.
+        final eventId = event['id'] as String?;
+        if (eventId != null && _pendingDirectCalls.remove(eventId)) {
+          _removeThinkingLines();
+          if (payload is Map<String, dynamic>) {
+            final message = payload['message'] as String? ?? 'Unknown error';
+            _addLine(TerminalLine(
+              type: TerminalLineType.error,
+              content: 'Shell bypass failed: $message',
+            ));
+          }
+          break;
+        }
         if (payload is Map<String, dynamic>) {
           final message = payload['message'] as String? ?? 'Unknown error';
           _addLine(TerminalLine(type: TerminalLineType.error, content: message));
@@ -282,6 +335,11 @@ class AgentScreenState extends State<AgentScreen> {
           _taskRunning = false;
           _activeTaskId = null;
         });
+        break;
+      case 'direct_tool_result':
+        if (payload is Map<String, dynamic>) {
+          _handleDirectToolResult(event['id'] as String?, payload);
+        }
         break;
       case 'config.current':
         // Config update broadcast — could refresh provider status
@@ -365,7 +423,7 @@ class AgentScreenState extends State<AgentScreen> {
     '/skills          — list available slash commands',
     '/stop            — stop current task',
     '/clear           — clear terminal output',
-    '/provider <name> — switch provider (copilot, claude, gemini)',
+    '/provider <name> — switch provider (copilot, claude, gemini, openrouter, ollama, azure)',
     '/session         — show current session info',
   ];
 
@@ -401,11 +459,12 @@ class AgentScreenState extends State<AgentScreen> {
         });
         return true;
       case '/provider':
-        if (arg.isNotEmpty && ['claude', 'gemini', 'copilot'].contains(arg.toLowerCase())) {
+        const knownProviders = ['claude', 'gemini', 'copilot', 'openrouter', 'ollama', 'azure'];
+        if (arg.isNotEmpty && knownProviders.contains(arg.toLowerCase())) {
           _onProviderSwitch(arg.toLowerCase());
         } else {
           _addLine(TerminalLine(type: TerminalLineType.text, content: 'Active: $_activeProvider'));
-          _addLine(TerminalLine(type: TerminalLineType.text, content: 'Usage: /provider <claude|gemini|copilot>'));
+          _addLine(TerminalLine(type: TerminalLineType.text, content: 'Usage: /provider <${knownProviders.join('|')}>'));
         }
         return true;
       case '/session':
@@ -427,13 +486,7 @@ class AgentScreenState extends State<AgentScreen> {
 
   void _handleModelCommand(String modelName) {
     if (modelName.isEmpty) {
-      // List available models for current provider.
-      final models = switch (_activeProvider) {
-        'copilot' => copilotModels,
-        'claude' => claudeModels,
-        'gemini' => geminiModels,
-        _ => <dynamic>[],
-      };
+      final models = modelsForProvider(_activeProvider);
       _addLine(TerminalLine(type: TerminalLineType.text, content: 'Current: $_activeModel ($_activeProvider)'));
       _addLine(TerminalLine(type: TerminalLineType.text, content: 'Available models:'));
       for (final m in models) {
@@ -443,6 +496,70 @@ class AgentScreenState extends State<AgentScreen> {
       return;
     }
     _onModelSwitch(modelName);
+  }
+
+  /// Build autocomplete suggestions for the input bar based on the current
+  /// text. Returns an empty list when there's nothing useful to suggest.
+  List<CommandSuggestion> _suggestFor(String text) {
+    if (!text.startsWith('/')) return const [];
+    final sp = text.indexOf(' ');
+    final cmd = sp == -1 ? text.toLowerCase() : text.substring(0, sp).toLowerCase();
+    final arg = sp == -1 ? '' : text.substring(sp + 1).trim().toLowerCase();
+
+    if (sp == -1) {
+      const cmds = [
+        ('/provider', 'switch AI provider'),
+        ('/model', 'switch model within provider'),
+        ('/session', 'show session info'),
+        ('/stop', 'stop current task'),
+        ('/clear', 'clear terminal'),
+        ('/skills', 'list slash commands'),
+      ];
+      return [
+        for (final c in cmds)
+          if (c.$1.startsWith(cmd))
+            CommandSuggestion(display: c.$1, value: '${c.$1} ', hint: c.$2),
+      ];
+    }
+
+    if (cmd == '/provider') {
+      const providers = [
+        ('copilot', 'Copilot subscription (device-auth)'),
+        ('claude', 'Direct Anthropic API'),
+        ('gemini', 'Direct Google API'),
+        ('openrouter', 'Many models, pay-per-token'),
+        ('ollama', 'Local models on device'),
+        ('azure', 'Azure OpenAI deployment'),
+      ];
+      return [
+        for (final p in providers)
+          if (arg.isEmpty || p.$1.startsWith(arg))
+            CommandSuggestion(
+              display: p.$1,
+              value: '/provider ${p.$1}',
+              hint: p.$2,
+              autoSubmit: true,
+            ),
+      ];
+    }
+
+    if (cmd == '/model') {
+      final models = modelsForProvider(_activeProvider);
+      return [
+        for (final m in models)
+          if (arg.isEmpty ||
+              m.id.toLowerCase().contains(arg) ||
+              m.label.toLowerCase().contains(arg))
+            CommandSuggestion(
+              display: m.id,
+              value: '/model ${m.id}',
+              hint: '${m.label} · ${m.description}',
+              autoSubmit: true,
+            ),
+      ];
+    }
+
+    return const [];
   }
 
   /// Switch model within the current provider by sending config.set to the backend.
@@ -480,6 +597,14 @@ class AgentScreenState extends State<AgentScreen> {
     // Handle slash commands locally (no login required)
     if (_handleSlashCommand(prompt)) return;
 
+    // `!<cmd>` shell-bypass: run the command directly via the daemon's
+    // shell_exec tool, skipping the LLM entirely. Useful for debugging the
+    // sandbox runtime without paying for a round-trip.
+    if (prompt.startsWith('!')) {
+      _handleShellBypass(prompt.substring(1));
+      return;
+    }
+
     _addLine(TerminalLine(type: TerminalLineType.userInput, content: prompt));
     _addLine(TerminalLine(type: TerminalLineType.separator));
 
@@ -506,21 +631,117 @@ class AgentScreenState extends State<AgentScreen> {
     }
   }
 
-  void _onProviderSwitch(String provider) {
-    // Set default model for the new provider.
-    final defaultModel = switch (provider) {
-      'copilot' => 'gpt-4o',
-      'claude' => 'claude-sonnet-4-20250514',
-      'gemini' => 'gemini-2.5-flash',
-      _ => 'gpt-4o',
-    };
+  /// `!<cmd>` shell-bypass: send a direct_tool_call for shell_exec and render
+  /// the result as a chat message. No LLM, no session — just the shell.
+  void _handleShellBypass(String command) {
+    final cmd = command.trim();
+    if (cmd.isEmpty) {
+      _addLine(TerminalLine(
+        type: TerminalLineType.error,
+        content: 'Usage: !<shell command> — e.g. !ls -la',
+      ));
+      return;
+    }
+
+    // Echo the command as user input so the chat history makes sense.
+    _addLine(TerminalLine(
+      type: TerminalLineType.userInput,
+      content: '\$ $cmd',
+    ));
 
     final api = context.read<OpenCodeAPI>();
+    final id = api.sendDirectToolCall(
+      'shell_exec',
+      args: {'command': cmd, 'description': 'shell bypass: $cmd'},
+    );
+
+    if (id == null) {
+      _addLine(TerminalLine(
+        type: TerminalLineType.error,
+        content: 'Failed to send direct tool call (no WebSocket connection)',
+      ));
+      return;
+    }
+
+    // Mark this id so _handleEvent knows it's a shell-bypass reply.
+    _pendingDirectCalls.add(id);
+    _addLine(TerminalLine(
+      type: TerminalLineType.agentThinking,
+      content: 'Running shell (bypass)...',
+    ));
+  }
+
+  /// Pending direct_tool_call IDs waiting on a direct_tool_result.
+  /// Used to distinguish our bypass traffic from any other ad-hoc calls.
+  final Set<String> _pendingDirectCalls = <String>{};
+
+  /// Render a direct_tool_result message (response to `!<cmd>`).
+  void _handleDirectToolResult(String? id, Map<String, dynamic> payload) {
+    _removeThinkingLines();
+
+    final tool = payload['tool'] as String? ?? 'tool';
+    final output = (payload['output'] as String? ?? '').trimRight();
+    final errMsg = payload['error'] as String? ?? '';
+    final metadata = payload['metadata'] as Map<String, dynamic>? ?? {};
+    final runtimeLabel = metadata['runtime'] as String? ?? 'unknown';
+    final exitCode = metadata['exit_code'];
+
+    // Header: clearly mark this as a bypass + show which sandbox served it.
+    // This is the runtime-debug signal the beta asked for.
+    final header = '[shell bypass · runtime=$runtimeLabel'
+        '${exitCode != null ? ' · exit=$exitCode' : ''}]';
+    _addLine(TerminalLine(
+      type: TerminalLineType.toolCall,
+      content: '$header $tool',
+    ));
+
+    if (output.isNotEmpty) {
+      _addToolResult(output);
+    }
+    if (errMsg.isNotEmpty && errMsg != 'exit code 0') {
+      _addLine(TerminalLine(
+        type: TerminalLineType.error,
+        content: errMsg,
+      ));
+    }
+    if (output.isEmpty && errMsg.isEmpty) {
+      _addLine(TerminalLine(
+        type: TerminalLineType.text,
+        content: '(no output)',
+      ));
+    }
+    _addLine(TerminalLine(type: TerminalLineType.separator));
+
+    if (id != null) {
+      _pendingDirectCalls.remove(id);
+    }
+  }
+
+  void _onProviderSwitch(String provider) {
+    // Pick the first model from the shared catalog as the default — keeps UI
+    // and backend aligned with provider_switcher.dart's source of truth.
+    final catalog = modelsForProvider(provider);
+    final defaultModel = catalog.isNotEmpty ? catalog.first.id : '';
+
+    final api = context.read<OpenCodeAPI>();
+    final ts = DateTime.now().millisecondsSinceEpoch;
     api.sendWsMessage({
       'type': 'provider.switch',
-      'id': 'sw-${DateTime.now().millisecondsSinceEpoch}',
+      'id': 'sw-$ts',
       'payload': {'provider': provider},
     });
+    if (defaultModel.isNotEmpty) {
+      // Also sync backend model — otherwise it sticks with the provider's
+      // compiled-in default and the UI label lies.
+      api.sendWsMessage({
+        'type': 'config.set',
+        'id': 'swm-$ts',
+        'payload': {
+          'key': 'providers.$provider.model',
+          'value': defaultModel,
+        },
+      });
+    }
 
     setState(() {
       _activeProvider = provider;
@@ -544,6 +765,9 @@ class AgentScreenState extends State<AgentScreen> {
                 attemptNumber: _reconnectAttempt > 0 ? _reconnectAttempt : null,
                 onRetry: _manualRetry,
               ),
+            // Degraded mode banner — proot configured but non-functional.
+            if (_prootDegraded && !_prootDegradedDismissed)
+              _buildDegradedBanner(),
             ProviderSwitcher(
               activeProvider: _activeProvider,
               activeModel: _activeModel,
@@ -561,9 +785,40 @@ class AgentScreenState extends State<AgentScreen> {
               showMic: false,
               taskRunning: _taskRunning,
               onStop: _stopTask,
+              suggest: _suggestFor,
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildDegradedBanner() {
+    const amber = AppColors.amber;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: amber.withAlpha(20),
+        border: Border(bottom: BorderSide(color: amber.withAlpha(50), width: 0.5)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.warning_amber_rounded, color: amber, size: 16),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              _prootDegradedError != null && _prootDegradedError!.length < 80
+                  ? 'Shell runtime: $_prootDegradedError'
+                  : 'Shell runtime unavailable — npm, pip, shell commands may not work. '
+                    'See Config › Runtime for details.',
+              style: AppTheme.uiFont(fontSize: 11, color: amber),
+            ),
+          ),
+          GestureDetector(
+            onTap: () => setState(() => _prootDegradedDismissed = true),
+            child: Icon(Icons.close_rounded, color: amber.withAlpha(150), size: 16),
+          ),
+        ],
       ),
     );
   }
@@ -603,7 +858,7 @@ class AgentScreenState extends State<AgentScreen> {
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              '${_bootstrapPercent}%',
+              '$_bootstrapPercent%',
               style: AppTheme.codeFont(fontSize: 11, color: AppColors.textMuted),
             ),
           ] else

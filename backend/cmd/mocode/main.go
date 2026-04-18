@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"mo-code/backend/agent"
 	"mo-code/backend/api"
@@ -17,6 +18,7 @@ import (
 	"mo-code/backend/provider"
 	"mo-code/backend/runtime"
 	"mo-code/backend/storage"
+	"mo-code/backend/tools"
 )
 
 // initDNS overrides Go's default resolver when MOCODE_DNS is set.
@@ -134,21 +136,75 @@ func main() {
 			log.Printf("warning: proot runtime disabled: %v", err)
 		} else {
 			log.Printf("proot runtime: bin=%s rootfs=%s projects=%s loader=%s", prootBin, prootRootFS, prootProjects, prootLoader)
-			// Install essential packages in background (first launch only).
+			// Run startup diagnostics then install essential packages in background.
 			go func() {
+				diag := proot.Diagnose(context.Background())
+				if diag.OK {
+					log.Printf("proot: startup check OK (echo ok passed)")
+				} else {
+					log.Printf("proot: startup check FAILED — %s", diag.Error)
+					log.Printf("proot: diagnostic detail: bin_exists=%v bin_executable=%v loader_exists=%v rootfs_exists=%v echo_ok=%v exit_code=%d stderr=%q",
+						diag.BinExists, diag.BinExecutable, diag.LoaderExists, diag.RootFSExists, diag.EchoOK, diag.ExitCode, diag.Stderr)
+					// Don't install packages if the runtime is broken — apk would fail too.
+					return
+				}
 				essentials := []string{"git", "nodejs", "npm", "python3", "curl", "openssh"}
 				log.Printf("proot: installing essential packages: %v", essentials)
-				installed, installErr := proot.InstallPackages(context.Background(), essentials)
+				var installErr error
+				var installed []string
+				for attempt := 1; attempt <= 3; attempt++ {
+					installed, installErr = proot.InstallPackages(context.Background(), essentials)
+					if installErr == nil {
+						break
+					}
+					log.Printf("proot: package install attempt %d/3 failed: %v", attempt, installErr)
+					if attempt < 3 {
+						time.Sleep(time.Duration(attempt*5) * time.Second)
+					}
+				}
 				if installErr != nil {
-					log.Printf("warning: failed to install packages: %v", installErr)
+					log.Printf("warning: failed to install packages after 3 attempts: %v", installErr)
 				} else if len(installed) > 0 {
 					log.Printf("proot: installed %v", installed)
+				} else {
+					log.Printf("proot: all essential packages already present in rootfs")
+				}
+			}()
+		}
+	}
+
+	// Initialize qemu-tcg runtime if configured (Android: stronger isolation than proot).
+	// When both are set, qemu wins for shell_exec; proot is still used for git tools.
+	var qemu *runtime.QemuRuntime
+	qemuBundle := os.Getenv("MOCODE_QEMU_BUNDLE")
+	qemuProjects := os.Getenv("MOCODE_QEMU_PROJECTS")
+	if qemuBundle != "" {
+		if qemuProjects == "" {
+			qemuProjects = filepath.Join(workingDir, "projects")
+		}
+		var err error
+		qemu, err = runtime.NewQemuRuntime(qemuBundle, qemuProjects)
+		if err != nil {
+			log.Printf("warning: qemu runtime disabled: %v", err)
+		} else {
+			log.Printf("qemu runtime: bundle=%s projects=%s", qemuBundle, qemuProjects)
+			go func() {
+				diag := qemu.Diagnose(context.Background())
+				if diag.OK {
+					log.Printf("qemu: startup check OK (boot=%dms, python-ok)", diag.BootMillis)
+				} else {
+					log.Printf("qemu: startup check FAILED — %s", diag.Error)
+					log.Printf("qemu: diagnostic detail: qemu_bin=%v kernel=%v initramfs=%v script=%v echo_ok=%v python_ok=%v",
+						diag.QemuBinExists, diag.KernelExists, diag.InitramfsFound, diag.ScriptExists, diag.EchoOK, diag.PythonOK)
 				}
 			}()
 		}
 	}
 
 	engine := agent.NewEngine(registry, workingDir, sessions, proot)
+	if qemu != nil {
+		engine = engine.WithQemu(qemu)
+	}
 	planEngine := agent.NewPlanEngine(registry, workingDir)
 
 	server, err := api.Start(portFile, engine, registry, sessions, planEngine)
@@ -158,6 +214,17 @@ func main() {
 	if proot != nil {
 		server.SetProot(proot)
 	}
+
+	// Wire a shared dispatcher for the `!<cmd>` shell-bypass feature
+	// (TypeDirectToolCall). Mirrors the backend config that Engine builds
+	// per-task so runtime routing (qemu > proot > host) matches exactly.
+	directDispatcher := tools.DefaultDispatcherWithOpts(workingDir, tools.DispatcherOpts{
+		Proot: proot,
+		Qemu:  qemu,
+	})
+	server.SetDispatcher(directDispatcher)
+	log.Printf("direct tool dispatcher ready: tools=%v", directDispatcher.Names())
+
 	log.Printf("mo-code daemon listening on 127.0.0.1:%d", server.Port())
 	log.Printf("port file: %s", portFile)
 

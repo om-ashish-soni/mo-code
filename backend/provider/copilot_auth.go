@@ -74,7 +74,10 @@ type CopilotAuth struct {
 // NewCopilotAuth creates a new CopilotAuth instance.
 func NewCopilotAuth() *CopilotAuth {
 	return &CopilotAuth{
-		client: &http.Client{Timeout: 30 * time.Second},
+		// 60s timeout: GitHub TLS handshake can be slow on first connection
+		// from a mobile device. The handler context is explicitly detached so
+		// this timeout is the true upper bound.
+		client: &http.Client{Timeout: 60 * time.Second},
 	}
 }
 

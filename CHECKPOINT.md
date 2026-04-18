@@ -1,11 +1,94 @@
 # Mo-Code Checkpoint
 
 ## Last updated
-2026-04-13 by Claude (C2, daemon binary bundling + in-app logs viewer)
+2026-04-14 by Claude (architecture review, Android 15 fix, Linux beta readiness)
 
 ## Handoff note
-FEAT-002 proot+Alpine: COMPLETE. FEAT-003 session context continuity: ALL THREE CLAUDES COMPLETE.
-**USB debugging fix:** Go daemon binary was never bundled in APK assets — added cross-compile step and placed ARM64 binary at `assets/bin/arm64-v8a/mocode`. Added daemon log file + in-app "View Logs" button on Config screen.
+FEAT-004 proot Android 15 fix: IMPLEMENTED (loader compiled, pending device test).
+Linux desktop beta: ~85% ready, 4 small gaps documented below.
+Strategy pattern + feature toggles: brainstormed, deferred until MO-63.
+
+---
+
+## Current State (2026-04-14)
+
+### Version: 1.2.0+3
+
+### What's complete and working
+- Full agent loop (16 tools, 6 providers, session continuity, compaction)
+- proot + Alpine runtime on Android ≤14 — fully working
+- FEAT-004 memfd_create loader — compiled, committed to jniLibs, **pending device test on Android 15**
+- proot diagnostics: `Diagnose()` in Go, `/api/runtime/diagnose` endpoint, degraded banner in Flutter
+- Subagents receive proot runtime (shell commands routed through Alpine)
+- Docs: `docs/issues/ISSUE-010-proot-exit255-android15.md` written
+- FEAT-004 status updated to IMPLEMENTED in `docs/features/FEAT-004-proot-android15-memfd-fix.md`
+
+### Uncommitted changes (13 modified + 6 untracked)
+All changes are related to FEAT-004 (proot diagnostics + Android 15 loader fix):
+
+| File | Change |
+|---|---|
+| `backend/agent/engine.go` | Pass proot to subagent runner |
+| `backend/agent/subagent.go` | Accept proot, conditional shell tool registration |
+| `backend/agent/subagent_test.go` | 4 new tests |
+| `backend/api/server.go` | POST /api/runtime/diagnose endpoint |
+| `backend/cmd/mocode/main.go` | Diagnose() at startup, retry installs, detailed logging |
+| `backend/runtime/proot.go` | Diagnose(), packageInstalledOnDisk(), seed installed map |
+| `backend/runtime/proot_test.go` | 5 new diagnostic tests |
+| `backend/tools/shell.go` | Exit-127 hints + apkPackageForCommand() |
+| `flutter/lib/api/daemon.dart` | runProotDiagnostic() HTTP call |
+| `flutter/lib/screens/agent_screen.dart` | _checkProotHealth() + degraded banner |
+| `flutter/lib/screens/config_screen.dart` | Run Diagnostic button + result card |
+| `flutter/pubspec.yaml` | Version 1.2.0+3 |
+| `docs/JIRA_EPIC.md` | Feature tracking updates |
+
+Untracked (new):
+- `loader/loader.c` — patched proot loader with memfd_create fallback
+- `flutter/android/app/src/main/jniLibs/arm64-v8a/libproot-loader.so` — compiled (2.8KB)
+- `scripts/build-loader.sh` + `scripts/verify-loader.sh`
+- `backend/mo-feed/` — tech intelligence pipeline
+- `docs/issues/ISSUE-010-proot-exit255-android15.md` — new
+- `store-listing/release-notes-1.2.0.txt`
+
+---
+
+## Next priorities
+
+### P0 — Verify Android 15 fix on device
+```bash
+adb shell run-as io.github.omashishsoni.mocode \
+  /data/app/*/lib/arm64/libproot.so \
+    -0 -r .../files/runtime/rootfs \
+    -b /dev -b /proc -b /sys \
+    -w /home/developer \
+    /bin/sh -c "echo ok && npm --version && python3 --version && git --version"
+```
+Expected: version strings, no exit 255. Then commit + release 1.2.0.
+
+### P1 — Linux desktop beta (4 gaps, ~half day of work)
+1. Fix `APPLICATION_ID` in `flutter/linux/CMakeLists.txt` (`com.example.mo_code` → `io.github.omashishsoni.mocode`)
+2. Hide bootstrap progress UI on non-Android (`agent_screen.dart`)
+3. Hide proot/runtime section in `config_screen.dart` on non-Android
+4. Write `scripts/run-linux.sh` (starts daemon + Flutter together)
+5. Package as tarball → GitHub Release
+
+Linux flow (works today — just needs polish):
+- `./scripts/start-server.sh` → daemon on port 19280
+- `flutter build linux --release` → `build/linux/x64/release/bundle/mo_code`
+- All tools work natively (no proot needed on Linux)
+
+### P2 — MO-63: Static NDK binaries (permanent Android 15 fix)
+Compile node, python3, git, busybox as static ARM64, ship as `.so` in jniLibs.
+Eliminates proot dependency for common tools. Opens iOS path.
+Implement alongside Strategy pattern + feature toggles (brainstormed 2026-04-14).
+
+### P3 — Strategy pattern + feature toggles (deferred until MO-63)
+`ExecutionStrategy` interface with DirectExec, Proot, StaticBin, Remote strategies.
+`StrategyResolver` picks strategy per command based on `RuntimeToggles`.
+Toggles auto-derived from Diagnose() at startup.
+Worth doing at MO-63 time, premature before that (only 2 strategies today).
+
+---
 
 | Claude | Scope | Key files | Status |
 |--------|-------|-----------|--------|

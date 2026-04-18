@@ -22,7 +22,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
   final _geminiKeyController = TextEditingController();
   final _workingDirController = TextEditingController();
 
-  String _activeProvider = 'claude';
+  String _activeProvider = 'copilot';
   Map<String, bool> _providerConfigured = {};
   Map<String, dynamic>? _serverStatus;
   Map<String, dynamic>? _runtimeStatus;
@@ -38,6 +38,10 @@ class _ConfigScreenState extends State<ConfigScreen> {
 
   // Copilot device auth state
   bool _copilotAuthInProgress = false;
+
+  // proot diagnostic results
+  Map<String, dynamic>? _diagResult;
+  bool _diagLoading = false;
   String? _copilotUserCode;
   String? _copilotVerificationUri;
   String? _copilotDeviceCode;
@@ -86,7 +90,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
 
     if (config != null) {
       setState(() {
-        _activeProvider = config['active_provider'] as String? ?? 'claude';
+        _activeProvider = config['active_provider'] as String? ?? 'copilot';
         final providers = config['providers'] as Map<String, dynamic>? ?? {};
         _providerConfigured = {
           'claude': (providers['claude'] as Map<String, dynamic>?)?['configured'] == true,
@@ -753,6 +757,20 @@ class _ConfigScreenState extends State<ConfigScreen> {
     );
   }
 
+  Future<void> _runDiagnostic() async {
+    setState(() {
+      _diagLoading = true;
+      _diagResult = null;
+    });
+    final api = context.read<OpenCodeAPI>();
+    final result = await api.runProotDiagnostic();
+    if (!mounted) return;
+    setState(() {
+      _diagResult = result;
+      _diagLoading = false;
+    });
+  }
+
   Widget _buildRuntimeSection() {
     final available = _runtimeStatus?['available'] == true;
     final sizeBytes = _runtimeStatus?['size_bytes'] as int? ?? 0;
@@ -797,24 +815,217 @@ class _ConfigScreenState extends State<ConfigScreen> {
             if (_runtimeStatus?['rootfs'] != null)
               _runtimeInfoRow('Rootfs', _runtimeStatus!['rootfs'] as String),
             const SizedBox(height: AppSpacing.lg),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: _resetRuntime,
-                icon: const Icon(Icons.refresh_rounded, size: 16),
-                label: const Text('Reset Environment'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.red,
-                  side: BorderSide(color: AppColors.red.withAlpha(60)),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _diagLoading ? null : _runDiagnostic,
+                    icon: _diagLoading
+                        ? const SizedBox(
+                            width: 14, height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.purple),
+                          )
+                        : const Icon(Icons.biotech_rounded, size: 16),
+                    label: Text(_diagLoading ? 'Running...' : 'Run Diagnostic'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.purple,
+                      side: BorderSide(color: AppColors.purple.withAlpha(60)),
+                    ),
+                  ),
                 ),
-              ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _resetRuntime,
+                    icon: const Icon(Icons.refresh_rounded, size: 16),
+                    label: const Text('Reset'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.red,
+                      side: BorderSide(color: AppColors.red.withAlpha(60)),
+                    ),
+                  ),
+                ),
+              ],
             ),
+            if (_diagResult != null) ...[
+              const SizedBox(height: AppSpacing.lg),
+              _buildDiagnosticResult(_diagResult!),
+            ],
           ] else ...[
             Text(
               'proot runtime is not configured. On Android, it bootstraps automatically on first launch.',
               style: AppTheme.uiFont(fontSize: 12, color: AppColors.textMuted),
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDiagnosticResult(Map<String, dynamic> diag) {
+    final ok = diag['ok'] == true;
+    final statusColor = ok ? AppColors.green : AppColors.amber;
+    final statusIcon = ok ? Icons.check_circle_rounded : Icons.warning_amber_rounded;
+    final statusText = ok ? 'All checks passed' : 'Runtime degraded';
+    final error = diag['error'] as String?;
+    final exitCode = diag['exit_code'] as int? ?? -1;
+    final stderr = diag['stderr'] as String? ?? '';
+    final isolationTier = diag['isolation_tier'] as String? ?? 'unknown';
+
+    Widget checkRow(String label, bool value) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+        child: Row(
+          children: [
+            Icon(
+              value ? Icons.check_rounded : Icons.close_rounded,
+              size: 14,
+              color: value ? AppColors.green : AppColors.red,
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Text(label, style: AppTheme.codeFont(fontSize: 12, color: AppColors.textSecondary)),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(color: statusColor.withAlpha(40)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(statusIcon, color: statusColor, size: 16),
+              const SizedBox(width: AppSpacing.sm),
+              Text(
+                statusText,
+                style: AppTheme.uiFont(fontSize: 13, color: statusColor, fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          _buildIsolationTierBadge(isolationTier),
+          const SizedBox(height: AppSpacing.md),
+          checkRow('binary found', diag['bin_exists'] == true),
+          checkRow('binary executable', diag['bin_executable'] == true),
+          checkRow('loader found', diag['loader_exists'] == true),
+          checkRow('rootfs found', diag['rootfs_exists'] == true),
+          checkRow('echo ok (functional)', diag['echo_ok'] == true),
+          if (exitCode != -1 && !ok) ...[
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              'exit code: $exitCode',
+              style: AppTheme.codeFont(fontSize: 11, color: AppColors.textMuted),
+            ),
+          ],
+          if (error != null && error.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              error,
+              style: AppTheme.uiFont(fontSize: 11, color: statusColor),
+            ),
+          ],
+          if (stderr.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Container(
+              padding: const EdgeInsets.all(AppSpacing.sm),
+              decoration: BoxDecoration(
+                color: AppColors.panel,
+                borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+              ),
+              child: SelectableText(
+                stderr,
+                style: AppTheme.codeFont(fontSize: 11, color: AppColors.red),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildIsolationTierBadge(String tier) {
+    final (label, color, summary) = switch (tier) {
+      'proot-hardened' => (
+        'Sandbox: Hardened proot',
+        AppColors.amber,
+        'Defense in depth — not true isolation. Host /dev and /sys are not '
+            'mounted; only safe char devices (null/zero/urandom/tty) are bound. '
+            '/proc remains visible to the guest. Universal — works on every '
+            'phone with no extra permissions.',
+      ),
+      'bwrap-shizuku' => (
+        'Sandbox: Shizuku + bubblewrap',
+        AppColors.blue,
+        'Real namespace isolation via the shell SELinux domain. User/net/pid/'
+            'mount namespaces, slirp4netns "internet only" networking, seccomp '
+            'syscall whitelist. Requires one-time wireless adb pairing.',
+      ),
+      'avf-microdroid' => (
+        'Sandbox: AVF Microdroid',
+        AppColors.green,
+        'Hardware-isolated microVM (pKVM). Only CPU, RAM, and virtio-net are '
+            'exposed to the guest. Pixel 7+ on Android 14+ only.',
+      ),
+      'no-sandbox' => (
+        'Sandbox: none',
+        AppColors.red,
+        'No sandbox — the daemon is running as a normal process. This is '
+            'expected on Linux desktop or when proot is not bootstrapped. '
+            'Do NOT run untrusted agent output here without inspection.',
+      ),
+      _ => (
+        'Sandbox: $tier',
+        AppColors.textMuted,
+        'Unknown isolation tier reported by the daemon.',
+      ),
+    };
+
+    return InkWell(
+      onTap: () => _showIsolationInfo(label, summary),
+      borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.sm,
+          vertical: AppSpacing.xs,
+        ),
+        decoration: BoxDecoration(
+          color: color.withAlpha(20),
+          borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+          border: Border.all(color: color.withAlpha(60)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.shield_outlined, size: 13, color: color),
+            const SizedBox(width: AppSpacing.xs),
+            Text(label, style: AppTheme.uiFont(fontSize: 11, color: color)),
+            const SizedBox(width: AppSpacing.xs),
+            Icon(Icons.info_outline_rounded, size: 12, color: color.withAlpha(180)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showIsolationInfo(String title, String body) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Text(title, style: AppTheme.uiFont(fontSize: 14, color: AppColors.textPrimary)),
+        content: Text(body, style: AppTheme.uiFont(fontSize: 12, color: AppColors.textSecondary)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text('Got it', style: AppTheme.uiFont(fontSize: 12, color: AppColors.purple)),
+          ),
         ],
       ),
     );
