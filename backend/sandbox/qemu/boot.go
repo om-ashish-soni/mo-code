@@ -18,7 +18,7 @@ import (
 // vm represents a running qemu-system-aarch64 process.
 type vm struct {
 	cmd    *exec.Cmd
-	stderr *bytes.Buffer
+	stderr *cappedBuffer
 
 	// overlayPath is the per-boot qcow2 overlay that wraps the read-only base
 	// image. Empty if ReadOnlyBase was false (qemu -snapshot handles it).
@@ -56,8 +56,8 @@ func startVM(ctx context.Context, cfg config) (*vm, error) {
 	// tear down the VM mid-run.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	stderr := &bytes.Buffer{}
-	cmd.Stderr = io.MultiWriter(stderr, &lineLimiter{cap: 64 * 1024, buf: stderr})
+	stderr := &cappedBuffer{cap: 64 * 1024}
+	cmd.Stderr = stderr
 	cmd.Stdout = io.Discard
 	cmd.Stdin = nil
 
@@ -191,16 +191,39 @@ func waitForSSH(ctx context.Context, cfg config, timeout time.Duration) error {
 	return lastErr
 }
 
-// lineLimiter discards all writes once the wrapped buffer reaches cap bytes.
-// Prevents runaway qemu stderr from blowing memory over a long session.
-type lineLimiter struct {
+// cappedBuffer is a bytes.Buffer that stops accepting data once it reaches cap
+// bytes. Writes after the cap are silently dropped but still report len(p) so
+// the caller (exec.Cmd's stderr pipe) doesn't treat them as errors. Prevents
+// runaway qemu stderr from blowing memory over a long session.
+type cappedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
 	cap int
-	buf *bytes.Buffer
 }
 
-func (l *lineLimiter) Write(p []byte) (int, error) {
-	if l.buf.Len() >= l.cap {
+func (c *cappedBuffer) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	room := c.cap - c.buf.Len()
+	if room <= 0 {
 		return len(p), nil
 	}
+	if len(p) > room {
+		c.buf.Write(p[:room])
+		return len(p), nil
+	}
+	c.buf.Write(p)
 	return len(p), nil
+}
+
+func (c *cappedBuffer) String() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.buf.String()
+}
+
+func (c *cappedBuffer) Len() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.buf.Len()
 }

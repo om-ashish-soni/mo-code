@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -70,7 +71,7 @@ func sshDial(ctx context.Context, cfg config) (*ssh.Client, error) {
 		// it with the APK; the risk model (127.0.0.1 user-mode net) does not
 		// justify the complexity for v1.
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec // loopback-only
-		Timeout:         5 * 1e9,                      // 5s, ssh internal timeout
+		Timeout:         5 * time.Second,
 	}
 
 	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.SSHPort))
