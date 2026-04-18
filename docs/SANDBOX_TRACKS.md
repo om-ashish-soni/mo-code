@@ -21,7 +21,7 @@ lives in `backend/sandbox/<name>/`. Zero overlap with other tracks.
 |-------|------|--------|----------|--------|-------|
 | A | termux-prefix | `feat/sandbox-termux` | `../worktrees/sandbox-termux` | not started | |
 | B | qemu-tcg | `feat/sandbox-qemu` | `../worktrees/sandbox-qemu` | not started | |
-| C | prebaked-rootfs | `feat/prebaked-rootfs` | `../worktrees/sandbox-prebake` | not started | |
+| C | prebaked-rootfs | `feat/prebaked-rootfs` | `../worktrees/sandbox-prebake` | ready for review | om-ashish-soni |
 | D | avf-microdroid | `feat/sandbox-avf` | `../worktrees/sandbox-avf` | not started | |
 
 Update the row when you claim/start/finish a track.

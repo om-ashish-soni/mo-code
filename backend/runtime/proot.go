@@ -267,6 +267,53 @@ func (r *ProotRuntime) IsReady(ctx context.Context) bool {
 	return err == nil && code == 0 && strings.TrimSpace(stdout) == "ok"
 }
 
+// ProotDiagnostic is the structured result of Diagnose, consumed by the
+// sandbox.Sandbox adapter (backend/sandbox/proot/backend.go) to build its
+// generic Diagnostic payload. Fields map 1:1 to the checks that adapter
+// surfaces via /api/runtime/diagnose.
+type ProotDiagnostic struct {
+	OK            bool
+	BinExists     bool
+	BinExecutable bool
+	LoaderExists  bool
+	RootFSExists  bool
+	EchoOK        bool
+	Error         string
+	IsolationTier string
+}
+
+// Diagnose performs a shallow health check of the proot runtime. It is
+// invoked by the sandbox adapter's Diagnose method — keep the field shape
+// of ProotDiagnostic in sync with backend/sandbox/proot/backend.go.
+func (r *ProotRuntime) Diagnose(ctx context.Context) ProotDiagnostic {
+	d := ProotDiagnostic{IsolationTier: "syscall-translation"}
+
+	if info, err := os.Stat(r.ProotBin); err == nil {
+		d.BinExists = true
+		d.BinExecutable = info.Mode()&0o111 != 0
+	}
+	if r.LoaderBin != "" {
+		if _, err := os.Stat(r.LoaderBin); err == nil {
+			d.LoaderExists = true
+		}
+	} else {
+		// No explicit loader configured — rely on proot's built-in. Report
+		// as present so the "missing loader" check doesn't fail devices
+		// where built-in loading works (pre-Android 15).
+		d.LoaderExists = true
+	}
+	if _, err := os.Stat(r.RootFS); err == nil {
+		d.RootFSExists = true
+	}
+
+	d.EchoOK = r.IsReady(ctx)
+	d.OK = d.BinExists && d.BinExecutable && d.RootFSExists && d.EchoOK
+	if !d.OK {
+		d.Error = "proot runtime health check failed — see individual checks"
+	}
+	return d
+}
+
 // RootFSSize returns the total size of the Alpine rootfs in bytes.
 func (r *ProotRuntime) RootFSSize() (int64, error) {
 	var total int64
