@@ -39,6 +39,13 @@ android/app/release/
 **/assets/runtime/alpine-minirootfs.tar.gz
 **/assets/runtime/proot-arm64
 
+# QEMU sandbox artifacts (built by scripts/build-qemu-*.sh, ship via release)
+**/assets/qemu/alpine-prebaked.qcow2
+**/assets/qemu/qemu-system-aarch64-arm64
+**/assets/qemu/qemu-img-arm64
+build/qemu-image/
+build/qemu-binary/
+
 # Logs
 *.log
 daemon.log
