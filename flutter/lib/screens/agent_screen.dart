@@ -669,6 +669,23 @@ class AgentScreenState extends State<AgentScreen> {
       type: TerminalLineType.agentThinking,
       content: 'Running shell (bypass)...',
     ));
+
+    // Client-side timeout: surface a visible error if the daemon goes silent
+    // for too long (e.g. WS dropped, dispatch hung). Matches the product
+    // promise that every failure must be visible, not silent.
+    Future.delayed(const Duration(seconds: 90), () {
+      if (!mounted) return;
+      if (!_pendingDirectCalls.remove(id)) return;
+      _removeThinkingLines();
+      _addLine(TerminalLine(
+        type: TerminalLineType.error,
+        content: '[shell bypass · TIMED OUT after 90s · client-side]\n'
+            'No direct_tool_result received. The daemon may have crashed or '
+            'the WebSocket dropped mid-dispatch. Check Config → Logs for '
+            'daemon stderr.',
+      ));
+      _addLine(TerminalLine(type: TerminalLineType.separator));
+    });
   }
 
   /// Pending direct_tool_call IDs waiting on a direct_tool_result.
@@ -698,16 +715,30 @@ class AgentScreenState extends State<AgentScreen> {
     if (output.isNotEmpty) {
       _addToolResult(output);
     }
-    if (errMsg.isNotEmpty && errMsg != 'exit code 0') {
+    // Always surface errors explicitly. Developer-app rule: raw stderr is
+    // the signal, not hidden. Render even "exit code 0" errors if the
+    // daemon attached extra context (e.g. warnings).
+    if (errMsg.isNotEmpty) {
       _addLine(TerminalLine(
         type: TerminalLineType.error,
         content: errMsg,
       ));
     }
-    if (output.isEmpty && errMsg.isEmpty) {
+    // If exit code is non-zero and we have no output or stderr, shout about
+    // it — silent exit-N is the exact failure mode that wasted prior test
+    // loops. Tell the user which runtime ran it so they know where to look.
+    if (exitCode is int && exitCode != 0 && output.isEmpty && errMsg.isEmpty) {
+      _addLine(TerminalLine(
+        type: TerminalLineType.error,
+        content: '[runtime=$runtimeLabel] command exited $exitCode '
+            'with no stdout and no stderr. '
+            'The runtime dropped the output — check daemon logs '
+            '(Config → Logs) for serial/ptrace details.',
+      ));
+    } else if (output.isEmpty && errMsg.isEmpty) {
       _addLine(TerminalLine(
         type: TerminalLineType.text,
-        content: '(no output)',
+        content: '(no output · exit=$exitCode · runtime=$runtimeLabel)',
       ));
     }
     _addLine(TerminalLine(type: TerminalLineType.separator));

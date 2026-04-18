@@ -58,8 +58,16 @@ func NewQemuRuntime(bundleDir, projectsDir string) (*QemuRuntime, error) {
 	if err != nil {
 		return nil, fmt.Errorf("qemu: resolve bundleDir: %w", err)
 	}
+	// Android 15 W^X: the qemu ELF is shipped via jniLibs and lives in
+	// applicationInfo.nativeLibraryDir (SELinux apk_data_file, exec OK).
+	// DaemonService exports MOCODE_QEMU_BIN pointing at it. Standalone/adb
+	// smoke tests still fall back to $bundle/bin/qemu-system-aarch64.
+	qemuBin := os.Getenv("MOCODE_QEMU_BIN")
+	if qemuBin == "" {
+		qemuBin = filepath.Join(abs, "bin", "qemu-system-aarch64")
+	}
 	required := []string{
-		filepath.Join(abs, "bin", "qemu-system-aarch64"),
+		qemuBin,
 		filepath.Join(abs, "boot", "vmlinuz-virt"),
 		filepath.Join(abs, "boot", "initramfs-rootfs-py.cpio.gz"),
 		filepath.Join(abs, qemuExecScript),
@@ -69,8 +77,9 @@ func NewQemuRuntime(bundleDir, projectsDir string) (*QemuRuntime, error) {
 			return nil, fmt.Errorf("qemu: missing bundle file %s: %w", p, err)
 		}
 	}
-	// Ensure qemu binary + script have exec bit (lost across APK updates).
-	_ = os.Chmod(filepath.Join(abs, "bin", "qemu-system-aarch64"), 0o755)
+	// Ensure qemu binary + script have exec bit when we can (lost across APK
+	// updates, and nativeLibraryDir is system-owned so chmod is best-effort).
+	_ = os.Chmod(qemuBin, 0o755)
 	_ = os.Chmod(filepath.Join(abs, qemuExecScript), 0o755)
 
 	if projectsDir != "" {
@@ -152,14 +161,21 @@ func (r *QemuRuntime) Exec(ctx context.Context, command, workDir string) (stdout
 	return stdout, stderr, exitCode, err
 }
 
-// qemuEnv returns the env for invoking qemu-exec-py.sh. The script itself
-// sets LD_LIBRARY_PATH for qemu; we only need to propagate a sane minimum.
+// qemuEnv returns the env for invoking qemu-exec-py.sh. The script reads
+// MOCODE_QEMU_BIN + MOCODE_QEMU_LD_LIBRARY_PATH exported by DaemonService so
+// it can find qemu in nativeLibraryDir (apk_data_file, exec-allowed) instead
+// of the old filesDir/qemu-smoke/bin/ path (app_data_file, W^X blocks exec).
 func (r *QemuRuntime) qemuEnv() []string {
 	env := []string{
 		"HOME=" + r.BundleDir,
 		"PATH=/system/bin:/system/xbin",
 		"TMPDIR=" + r.BundleDir,
 		"TERM=dumb",
+	}
+	for _, k := range []string{"MOCODE_QEMU_BIN", "MOCODE_QEMU_LD_LIBRARY_PATH"} {
+		if v := os.Getenv(k); v != "" {
+			env = append(env, k+"="+v)
+		}
 	}
 	if v := os.Getenv("QEMU_EXEC_TIMEOUT"); v != "" {
 		env = append(env, "QEMU_EXEC_TIMEOUT="+v)
@@ -206,7 +222,10 @@ type QemuDiagnosticResult struct {
 func (r *QemuRuntime) Diagnose(ctx context.Context) QemuDiagnosticResult {
 	result := QemuDiagnosticResult{ExitCode: -1, IsolationTier: r.IsolationTier()}
 
-	qemuBin := filepath.Join(r.BundleDir, "bin", "qemu-system-aarch64")
+	qemuBin := os.Getenv("MOCODE_QEMU_BIN")
+	if qemuBin == "" {
+		qemuBin = filepath.Join(r.BundleDir, "bin", "qemu-system-aarch64")
+	}
 	if info, err := os.Stat(qemuBin); err == nil {
 		result.QemuBinExists = true
 		if info.Mode()&0o111 == 0 {

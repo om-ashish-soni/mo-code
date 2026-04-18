@@ -317,7 +317,13 @@ func (c *wsClient) serve() {
 		}
 
 		log.Printf("[ws:recv] type=%s id=%s task_id=%s", raw.Type, raw.ID, raw.TaskID)
-		c.dispatch(raw)
+		// Dispatch off the reader goroutine so long-running synchronous
+		// handlers (e.g. direct_tool_call → shell_exec running in the QEMU
+		// VM for 30-60s) don't block ReadJSON. If the reader stalls, we
+		// stop consuming pong frames → the server thinks the client went
+		// away, hangs up, and the result write fails with broken pipe.
+		// Concurrent writes are already guarded by c.writeMu.
+		go c.dispatch(raw)
 	}
 }
 

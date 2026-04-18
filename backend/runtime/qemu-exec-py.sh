@@ -35,7 +35,13 @@ INITRD="${QEMU_INITRD:-$HERE/boot/initramfs-rootfs-py.cpio.gz}"
 # on OnePlus CPH2467 / Android 15.
 LINE_PAUSE="${QEMU_LINE_PAUSE:-0.15}"
 
-export LD_LIBRARY_PATH="$HERE/lib:/system/lib64"
+# Where the qemu ELF + its .so deps live. Under Android 15 SELinux W^X, the
+# untrusted_app domain cannot mmap(PROT_EXEC) files in app_data_file (filesDir),
+# so we exec qemu from nativeLibraryDir (apk_data_file, exec allowed). The
+# DaemonService exports these; fall back to the legacy $HERE layout for
+# standalone testing via adb.
+QEMU_BIN="${MOCODE_QEMU_BIN:-$HERE/bin/qemu-system-aarch64}"
+export LD_LIBRARY_PATH="${MOCODE_QEMU_LD_LIBRARY_PATH:-$HERE/lib:/system/lib64}"
 
 # Write the per-command guest script to a tempfile, one statement per line.
 # Splitting the previous `; ; ;` single-line form into discrete lines is what
@@ -56,7 +62,7 @@ rm -f "$FIFO"
 mkfifo "$FIFO" 2>/dev/null || { echo "qemu-exec: mkfifo $FIFO failed" >&2; rm -f "$SERIAL_LOG"; exit 3; }
 
 # Start qemu in background reading from fifo.
-"$HERE/bin/qemu-system-aarch64" \
+"$QEMU_BIN" \
   -L "$HERE/roms/qemu" \
   -machine virt -cpu max -smp 1 -m 256 \
   -kernel "$HERE/boot/vmlinuz-virt" \
