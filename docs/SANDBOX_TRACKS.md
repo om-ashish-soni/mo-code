@@ -19,7 +19,7 @@ lives in `backend/sandbox/<name>/`. Zero overlap with other tracks.
 
 | Track | Name | Branch | Worktree | Status | Owner |
 |-------|------|--------|----------|--------|-------|
-| A | termux-prefix | `feat/sandbox-termux` | `../worktrees/sandbox-termux` | not started | |
+| A | termux-prefix | `feat/sandbox-termux` | `../worktrees/sandbox-termux` | ready for review | Claude (worker) |
 | B | qemu-tcg | `feat/sandbox-qemu` | `../worktrees/sandbox-qemu` | not started | |
 | C | prebaked-rootfs | `feat/prebaked-rootfs` | `../worktrees/sandbox-prebake` | not started | |
 | D | avf-microdroid | `feat/sandbox-avf` | `../worktrees/sandbox-avf` | not started | |
