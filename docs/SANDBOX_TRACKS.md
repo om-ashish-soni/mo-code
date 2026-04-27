@@ -20,7 +20,7 @@ lives in `backend/sandbox/<name>/`. Zero overlap with other tracks.
 | Track | Name | Branch | Worktree | Status | Owner |
 |-------|------|--------|----------|--------|-------|
 | A | termux-prefix | `feat/sandbox-termux` | `../worktrees/sandbox-termux` | not started | |
-| B | qemu-tcg | `feat/sandbox-qemu` | `../worktrees/sandbox-qemu` | not started | |
+| B | qemu-tcg | `feat/sandbox-qemu` | `../worktrees/sandbox-qemu` | ready for review | claude/om |
 | C | prebaked-rootfs | `feat/prebaked-rootfs` | `../worktrees/sandbox-prebake` | not started | |
 | D | avf-microdroid | `feat/sandbox-avf` | `../worktrees/sandbox-avf` | not started | |
 
